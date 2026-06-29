@@ -1,0 +1,2774 @@
+// Apex Deal Coach — app.js
+// Refactored: clean split, no duplicate functions
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 1: UTILITIES
+// ════════════════════════════════════════════════════════════════
+
+const SK = 'apex_v8';
+function loadDB()    { try { return JSON.parse(localStorage.getItem(SK) || '[]'); } catch(e) { return []; } }
+function saveDB(arr) { try { localStorage.setItem(SK, JSON.stringify(arr)); } catch(e) {} }
+function gv(id)  { return document.getElementById(id).value.trim(); }
+function gn(id)  { return parseFloat(document.getElementById(id).value) || 0; }
+function el(id)  { return document.getElementById(id); }
+function sgd(n)  { return 'SGD ' + Math.round(n).toLocaleString('en-SG'); }
+
+function initials(n) {
+  if (!n) return '?';
+  return n.replace(/^(mr|mrs|ms|dr)\.?\s*/i, '')
+    .split(' ').filter(Boolean).slice(0, 2)
+    .map(w => w[0].toUpperCase()).join('');
+}
+
+function riskStyle(r) {
+  return r === 'High'   ? 'background:var(--rbg);color:var(--red)'
+       : r === 'Medium' ? 'background:var(--abg);color:var(--amb)'
+                        : 'background:var(--gbg);color:var(--green)';
+}
+
+function pill(k, v) {
+  return v ? `<div class="pl"><div class="pll">${k}</div><div class="plv">${v}</div></div>` : '';
+}
+
+function showToast(msg) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function showPage(p) {
+  document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(x => x.classList.remove('active'));
+  el('page-' + p).classList.add('active');
+  el('nav-' + p).classList.add('active');
+  if (p === 'history')  { backToList(); renderHistory(); }
+  if (p === 'match')    { renderVmHistory(); }
+  if (p === 'copilot')  { cp_renderHistory(); }
+  if (p === 'memory')   { mem_render(); }
+  updateBadge();
+}
+
+function updateBadge() {
+  const n = loadDB().length;
+  const b = el('hist-count');
+  b.textContent = n;
+  b.style.display = n ? '' : 'none';
+}
+
+function copyMsg(bubbleId, btnId) {
+  const txt = el(bubbleId).textContent;
+  navigator.clipboard.writeText(txt).then(() => {
+    const btn = el(btnId);
+    btn.textContent = '✓ Copied!';
+    btn.classList.add('ok');
+    setTimeout(() => { btn.innerHTML = '&#128203; Copy'; btn.classList.remove('ok'); }, 2000);
+  }).catch(() => showToast('Copy failed — select and copy manually'));
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 2: DEAL COACH — ANALYSIS LOGIC
+// ════════════════════════════════════════════════════════════════
+
+let _lastInput = null, _lastResult = null;
+
+function buildProfile(d) {
+  const types = {
+    Status:      { type: 'Status Buyer',      icon: '💎' },
+    Family:      { type: 'Family Buyer',       icon: '👨‍👩‍👧' },
+    Budget:      { type: 'Budget Buyer',       icon: '💰' },
+    Performance: { type: 'Performance Buyer',  icon: '🏎️' },
+    Convenience: { type: 'Convenience Buyer',  icon: '🛋️' },
+    Unknown:     { type: 'First-time Buyer',   icon: '🌱' }
+  };
+  const tm = types[d.motivation] || types.Unknown;
+  const s = d.showrooms || '', tl = d.timeline || '', obj = (d.objection || '').toLowerCase();
+
+  let stage = 'Browsing', si = '👀';
+  if (tl.includes('1 week') || obj.includes('price'))  { stage = 'Negotiating';  si = '🤝'; }
+  else if (tl.includes('2–4') || s.includes('1–2'))    { stage = 'Comparing';    si = '⚖️'; }
+  else if (s.includes('This is'))                       { stage = 'Ready to buy'; si = '✅'; }
+
+  let trust = 'Medium', ti = '🟡';
+  if (s.includes('5+') || tl.includes('3–6') || tl.includes('Just')) { trust = 'Low';  ti = '🔴'; }
+  else if (s.includes('This is') || tl.includes('1 week'))            { trust = 'High'; ti = '🟢'; }
+
+  const urgencyMap = { 'Within 1 week': 'Very high', '2–4 weeks': 'High', '1–3 months': 'Moderate', '3–6 months': 'Low', 'Just browsing': 'Low' };
+  const urgency = urgencyMap[tl] || 'Moderate';
+
+  let prob = 50;
+  if (tl.includes('1 week'))                               prob += 25;
+  else if (tl.includes('2–4'))                             prob += 15;
+  else if (tl.includes('3–6') || tl.includes('Just'))      prob -= 20;
+  if (s.includes('This is'))   prob += 15;
+  else if (s.includes('5+'))   prob -= 20;
+  else if (s.includes('3–5'))  prob -= 10;
+  if (d.objection && d.objection.length > 3) prob -= 10;
+  if (d.motivation === 'Unknown')            prob -= 10;
+  if (d.dp || d.monthly)                    prob += 10;
+  prob = Math.max(5, Math.min(95, prob));
+  const probColor = prob >= 70 ? 'var(--green)' : prob <= 35 ? 'var(--red)' : 'var(--amb)';
+  return { type: tm.type, typeIcon: tm.icon, stage, stageIcon: si, trust, trustIcon: ti, urgency, prob, probColor };
+}
+
+function buildConcerns(d) {
+  const m = d.motivation || 'Unknown', obj = (d.objection || '').toLowerCase();
+  const notes = (d.notes || '').toLowerCase(), s = d.showrooms || '';
+  const base = {
+    Status:      [{ text: 'Spouse or family disapproval',    sub: 'Partner may not agree on this model',             dot: '#378ADD' },
+                  { text: 'Peer perception risk',            sub: 'Worried if this signals the right status',         dot: '#7F77DD' }],
+    Family:      [{ text: 'Spouse has not seen the car yet', sub: 'Decision unlikely without partner sign-off',       dot: '#378ADD' },
+                  { text: 'Safety concerns not addressed',   sub: 'Needs more evidence before committing',            dot: 'var(--red)' }],
+    Budget:      [{ text: 'Monthly commitment anxiety',      sub: 'Worried about stretching cash flow',               dot: '#EF9F27' },
+                  { text: 'Hidden costs concern',            sub: 'Fears fees not shown upfront',                     dot: 'var(--red)' }],
+    Performance: [{ text: 'Insurance and running cost worry',sub: 'High-performance = high upkeep expectation',       dot: '#EF9F27' },
+                  { text: 'Spouse or family disapproval',    sub: 'Partner may prefer a more practical choice',       dot: '#378ADD' }],
+    Convenience: [{ text: 'Trade-in value uncertainty',      sub: 'Unsure if current car gets fair valuation',        dot: '#EF9F27' },
+                  { text: 'Paperwork and process anxiety',   sub: 'Worried the switch will be complicated',           dot: '#378ADD' }],
+    Unknown:     [{ text: 'Still building trust with you',   sub: 'Has not decided to commit to this showroom',       dot: 'var(--red)' },
+                  { text: 'Comparing 2–3 other options',     sub: 'Not yet emotionally attached to any car',          dot: '#EF9F27' }]
+  };
+  const out = [...(base[m] || base.Unknown)];
+  if (obj.includes('think') || obj.includes('consider'))
+    out.push({ text: 'Waiting for an external trigger',  sub: 'Salary bonus, end of current loan, or family decision', dot: '#9FE1CB' });
+  if (s.includes('5+') || s.includes('3–5'))
+    out.push({ text: 'Comparing dealerships actively',   sub: 'Price and trust benchmarking across showrooms',         dot: 'var(--red)' });
+  if (obj.includes('expens') || obj.includes('price'))
+    out.push({ text: 'Monthly payment feels too high',   sub: 'Budget ceiling may be lower than stated',              dot: '#EF9F27' });
+  if (notes.includes('wife') || notes.includes('husband') || notes.includes('spouse'))
+    out.push({ text: 'Spouse approval is a hard gate',   sub: 'Deal will not close without partner in showroom',      dot: '#AFA9EC' });
+  if (notes.includes('bonus') || notes.includes('salary'))
+    out.push({ text: 'Waiting for salary bonus',         sub: 'May delay 1–2 months regardless of interest level',    dot: '#9FE1CB' });
+  return out.slice(0, 4);
+}
+
+function buildQuestions(d) {
+  const n = (d.name || '').split(' ')[0] || 'them', car = d.car || 'this car';
+  const qb = {
+    Status:      [`"${n}, is there a specific feature on ${car} that represents you well?"`,
+                  `"Who else is involved — is there a partner whose opinion matters?"`,
+                  `"Have you driven anything in this class before?"`],
+    Family:      [`"Would it help to bring your family in for a test drive this weekend?"`,
+                  `"Which matters more — boot space, or rear legroom and comfort?"`,
+                  `"Have you checked the safety ratings together?"`],
+    Budget:      [`"What monthly number would make you feel completely comfortable?"`,
+                  `"Are there existing financial commitments we should factor in?"`,
+                  `"If we hit your number, is there anything else holding you back?"`],
+    Performance: [`"Have you driven this engine variant on the road yet?"`,
+                  `"Is performance the priority, or more about the day-to-day feel?"`,
+                  `"What does your current car feel like — what are you looking to improve?"`],
+    Convenience: [`"What's the biggest frustration with your current car?"`,
+                  `"If we handle the full trade-in process, does that remove a major barrier?"`,
+                  `"What day works best for a test drive?"`],
+    Unknown:     [`"Out of all the cars you've seen, which felt closest — and what was missing?"`,
+                  `"If you had to decide today, what would stop you?"`,
+                  `"What does your ideal car ownership experience look like?"`]
+  };
+  const base = (qb[d.motivation] || qb.Unknown).slice();
+  if ((d.showrooms || '').includes('5+'))
+    base[2] = `"You've visited quite a few showrooms — what's been the main gap we can fill?"`;
+  return base;
+}
+
+function buildWarnings(d) {
+  const obj = (d.objection || '').toLowerCase(), s = d.showrooms || '', tl = d.timeline || '';
+  const out = [];
+  if (s.includes('3–5') || s.includes('5+'))
+    out.push({ main: 'Do not offer a discount yet', why: 'Customer is still actively comparing. A premature discount signals desperation and anchors them to expect more.' });
+  if (obj.includes('think') || obj.includes('consider'))
+    out.push({ main: 'Do not let them leave without a next step', why: '"Need to think" without a follow-up date means the deal goes cold. Lock in a callback before they walk.' });
+  if (d.motivation === 'Status')
+    out.push({ main: 'Do not lead with price or payment', why: 'Status buyers are emotionally driven. Opening with finance kills the aspiration. Lead with prestige first.' });
+  if (d.motivation === 'Family')
+    out.push({ main: 'Do not close without the spouse present', why: 'Family buyers rarely decide alone. Pushing for a close without the partner risks post-sale cancellation.' });
+  if (tl.includes('Just') || tl.includes('3–6'))
+    out.push({ main: 'Do not apply closing pressure today', why: 'Customer is in early stage. Hard closing will disengage them. Focus on rapport and qualifying needs.' });
+  if (out.length === 0)
+    out.push({ main: 'Do not skip the finance walkthrough', why: 'Even engaged buyers lose confidence if they cannot visualise the monthly commitment clearly.' });
+  return out.slice(0, 2);
+}
+
+function buildStrategy(d) {
+  const sm = {
+    Status:      [{ t: 'Open with identity, not specs',        d: 'Acknowledge their taste. Make them feel their judgment is already good — you are here to confirm it.' },
+                  { t: 'Create a private, premium experience',  d: 'Step away from the floor. Show them the VIP delivery process and how other respected clients were handled.' },
+                  { t: 'Close on emotion, confirm with logic',  d: 'Anchor with: "This suits exactly where you are right now." Then offer a priority reservation.' }],
+    Family:      [{ t: 'Earn the trust of the decision-maker',  d: 'Identify who has final say. Direct key safety and comfort points to them. Never talk over them.' },
+                  { t: 'Make the test drive a family moment',   d: 'Invite the whole family. Demonstrating rear space and safety features in person closes faster than any brochure.' },
+                  { t: 'Remove post-purchase anxiety',          d: 'Walk through the warranty and servicing plan. Families buy peace of mind, not just transportation.' }],
+    Budget:      [{ t: 'Reframe cost as a daily number',        d: 'SGD 1,500/month sounds like a lot. SGD 49/day sounds manageable. Break it down to the smallest unit.' },
+                  { t: 'Show total cost of ownership',          d: 'Compare fuel savings, servicing costs, and resale value against cheaper alternatives.' },
+                  { t: 'Offer structured options with anchors', d: 'Present three options: base, mid, recommended. Make the middle option look like the smart compromise.' }],
+    Performance: [{ t: 'Lead with the driving experience',     d: 'Skip the spec sheet. Get them behind the wheel immediately. Emotion closes performance buyers.' },
+                  { t: 'Address the practical counter',         d: 'Acknowledge it: "The running costs are actually very reasonable compared to what you get."' },
+                  { t: 'Create scarcity on the right spec',     d: 'If stock of this variant is limited, say so. Urgency converts faster in this segment.' }],
+    Convenience: [{ t: 'Solve the biggest pain point first',   d: 'Ask what frustrates them most about their current car. Then show how this model solves that problem.' },
+                  { t: 'Handle all the switching friction',     d: 'Trade-in, paperwork, LTA transfer, collection timing — offer to manage everything.' },
+                  { t: 'Set a deadline they control',           d: 'Ask when their current car is due for inspection. Use that as a natural anchor date.' }],
+    Unknown:     [{ t: 'Qualify before pitching anything',     d: 'Ask open questions for the first ten minutes. Find the emotional trigger that brought them in today.' },
+                  { t: 'Narrow to two options, not one',        d: 'Too many choices cause paralysis. Present exactly two options and explain why one is better.' },
+                  { t: 'Soft close with a decision framework',  d: '"If I can match everything you need, would you be comfortable moving forward this month?"' }]
+  };
+  const steps = (sm[d.motivation] || sm.Unknown).map(s => ({ ...s }));
+  if ((d.showrooms || '').includes('5+'))
+    steps[0] = { t: 'Differentiate immediately', d: 'Open with: "I want to show you something you probably haven\'t seen at the other showrooms."' };
+  if ((d.timeline || '').includes('1 week'))
+    steps[2] = { t: 'Lock in a decision before they leave', d: 'Offer a 24-hour reservation with a small refundable deposit. Frame it as securing their preferred colour and spec.' };
+  return steps;
+}
+
+function motAnalyze(d) {
+  const m = d.motivation || 'Unknown', car = d.car || 'the vehicle', name = d.name || 'the customer';
+  const obj = (d.objection || '').toLowerCase();
+  const motData = {
+    Status:      { concern: "Worried peers or spouse won't approve. Wants social validation.", resp: `${name}, this model is exactly what our clients in similar positions drive. Understated prestige.`, trust: ['Share a client story (discretely)', 'Point out subtle premium details', 'Reinforce this is a considered, respected choice'] },
+    Family:      { concern: "Spouse or parent not on board. Safety and practicality trump preference.", resp: `${name}, the safety ratings are among the best in class. Boot space, ISOFIX, rear legroom — it checks everything.`, trust: ['Offer a family test drive on the weekend', 'Share the safety report / crash test rating', 'Highlight aftersales care and warranty'] },
+    Budget:      { concern: "Cash flow is tight. Fear of overcommitting monthly.", resp: `${name}, let's work backwards from what's comfortable monthly. With the right tenure and downpayment, I can make the numbers work.`, trust: ['Show full instalment breakdown transparently', 'Never hide fees — itemise everything', 'Compare total cost of ownership vs alternatives'] },
+    Performance: { concern: "Excited about specs but worried about running costs or spouse disapproval.", resp: `${name}, let me pull up the real-world output on this trim. Tuned for our roads — not just track numbers.`, trust: ['Know the specs cold', 'Offer a spirited test drive if possible', 'Connect emotionally — share what other drivers feel'] },
+    Convenience: { concern: "Specific pain point with current car. Wants the switch to feel easy.", resp: `${name}, compared to what you're driving now, this upgrade pays for itself in time saved and stress avoided.`, trust: ['Understand current car pain points first', 'Quantify the upgrade benefit concretely', 'Highlight the seamless trade-in process'] },
+    Unknown:     { concern: "Still in discovery mode. Not committed mentally or emotionally.", resp: `${name}, I'm not here to push you. What would make this the car you'd be happy waking up to every day?`, trust: ['Ask open questions, listen more than pitch', "Don't pitch — consult", 'Follow up with a personalised shortlist'] }
+  };
+  const mot = motData[m] || motData.Unknown;
+  const dk = {
+    'too expensive': "Reframe value, don't slash price. Attach any discount to a condition — trade-in, faster decision, or accessories swap.",
+    'need to think': 'Ask: "What specifically are you comparing?" Offer to address it now. Set a follow-up within 48 hours.',
+    'default':       "Avoid leading with discount — it signals desperation. Offer accessories or free servicing instead of cash off."
+  };
+  const disc = Object.keys(dk).find(k => obj.includes(k)) || 'default';
+  let fin = '';
+  if (d.budget && d.dp && d.monthly && d.tenure) {
+    const loan = parseInt(d.budget) - parseInt(d.dp);
+    const calc = Math.round((loan * (1 + 0.028 * parseInt(d.tenure))) / (parseInt(d.tenure) * 12));
+    fin = `Loan: SGD ${loan.toLocaleString()} over ${d.tenure} at ~2.8% p.a. Estimated: SGD ${calc.toLocaleString()}/mo. `;
+    fin += parseInt(d.monthly) < calc
+      ? `Gap vs desired: SGD ${(calc - parseInt(d.monthly)).toLocaleString()}/mo — consider higher DP or longer tenure.`
+      : 'Fits within desired instalment range.';
+  } else {
+    fin = 'Collect full budget, downpayment, and desired instalment to calculate. SG car loan: 2.5–3.0% p.a., up to 7 years, max 70% LTV for OMV > SGD 20k.';
+  }
+  let rs = 0;
+  const s = d.showrooms || '', tl = d.timeline || '';
+  if (s.includes('5+')) rs += 3; else if (s.includes('3–5')) rs += 2; else if (s.includes('1–2')) rs += 1;
+  if (tl.includes('3–6') || tl.includes('Just')) rs += 3; else if (tl.includes('1–3')) rs += 2;
+  if (d.objection && d.objection.length > 3) rs += 2;
+  if (m === 'Unknown') rs += 1;
+  if (!d.dp && !d.monthly) rs += 1;
+  const risk = rs >= 6 ? 'High' : rs >= 3 ? 'Medium' : 'Low';
+  const riskReason = risk === 'High'   ? 'Customer is browsing widely, timeline is long. Qualify commitment before investing more time.'
+                   : risk === 'Medium' ? 'Some hesitation — likely comparing. Stay top-of-mind and tighten follow-up.'
+                                       : 'Strong buying signals. Clear motivation, near timeline. Focus on closing.';
+  const fn = (d.name || '').split(' ')[0] || 'there';
+  const wa = `Hi ${fn}! Great chatting today about the ${car}. 🚗\n\nI've prepared a personalised breakdown based on your preferred monthly instalment — happy to walk you through it anytime.\n\nI can also hold a test drive slot this weekend — units move quickly. Just drop me a message! 😊\n\n– [Your name]`;
+  return { concern: mot.concern, resp: mot.resp, trust: mot.trust, discount: dk[disc], finance: fin, risk, riskReason, whatsapp: wa };
+}
+
+function analyze() {
+  const d = {
+    name: gv('name'), motivation: gv('motivation'), car: gv('car'),
+    budget: gv('budget'), dp: gv('dp'), monthly: gv('monthly'), tenure: gv('tenure'),
+    tradein: gv('tradein'), objection: gv('objection'), showrooms: gv('showrooms'),
+    timeline: gv('timeline'), notes: gv('notes')
+  };
+  const btn = el('analyzeBtn');
+  btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+  btn.classList.add('loading');
+
+  // ── Try GPT first, fall back to local logic ──
+  apexAI('coach', d).then(gptResult => {
+    let r, prof, concerns, questions, warnings, strategy;
+    const usedFallback = !gptResult || gptResult.fallback;
+
+    if (gptResult && !gptResult.fallback) {
+      // ── GPT path ──
+      prof      = gptResult.profile   || buildProfile(d);
+      concerns  = gptResult.concerns  || buildConcerns(d);
+      questions = gptResult.questions || buildQuestions(d);
+      warnings  = gptResult.warnings  || buildWarnings(d);
+      strategy  = gptResult.strategy  || buildStrategy(d);
+      r         = { concern: gptResult.concern||'', resp: gptResult.resp||'', trust: gptResult.trust||[], discount: gptResult.discount||'', finance: gptResult.finance||'', risk: gptResult.risk||'Medium', riskReason: gptResult.riskReason||'', whatsapp: gptResult.whatsapp||'' };
+      r.concerns = concerns; r.questions = questions; r.warnings = warnings; r.strategy = strategy;
+    } else {
+      // ── Local fallback ──
+      r = motAnalyze(d); prof = buildProfile(d);
+      concerns = buildConcerns(d); questions = buildQuestions(d);
+      warnings = buildWarnings(d); strategy = buildStrategy(d);
+      r.concerns = concerns; r.questions = questions; r.warnings = warnings; r.strategy = strategy;
+      if (usedFallback && gptResult && gptResult.error) {
+        apexShowError('report', gptResult.error, true);
+      }
+    }
+
+    renderCoachResult(r, prof, d);
+
+    _lastInput  = d;
+    _lastResult = { ...r, profile: prof, concerns, questions, warnings, strategy };
+    const sb = el('saveBtn');
+    sb.innerHTML = '&#128190; Save Deal'; sb.classList.remove('saved'); sb.disabled = false;
+
+    btn.innerHTML = '&#129504; Analyze deal'; btn.classList.remove('loading');
+    el('report').style.display = '';
+    el('report').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+function saveCustomer() {
+  if (!_lastInput || !_lastResult) { showToast('Run Analyze Deal first'); return; }
+  const all = loadDB();
+  all.push({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    ts: Date.now(),
+    input: _lastInput,
+    result: _lastResult
+  });
+  saveDB(all);
+  const sb = el('saveBtn');
+  sb.innerHTML = '&#10003; Deal Saved!'; sb.classList.add('saved'); sb.disabled = true;
+  updateBadge();
+  // Auto-record to Memory Engine
+  const prof = _lastResult.profile || {};
+  mem_record({
+    customerType: prof.type  || _lastInput.motivation || '',
+    vehicle:      _lastInput.car || '',
+    budget:       parseInt(_lastInput.budget) || 0,
+    stage:        prof.stage || '',
+    objection:    _lastInput.objection || '',
+    trust:        prof.trust || '',
+    intent:       prof.prob  || 0,
+    closingProb:  prof.prob  || 0,
+    result:       'pending',
+    src:          'coach'
+  });
+  // Increment today's counter and show success modal
+  sessionIncrement();
+  showToast('\u2705 Deal saved to Apex Memory');
+  showDealSavedModal();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 3: FOLLOW-UP ENGINE
+// ════════════════════════════════════════════════════════════════
+
+function generateFollowUp() {
+  const name    = gv('fu-name') || 'the customer';
+  const fn      = name.replace(/^(mr|mrs|ms|dr)\.\s*/i, '').split(' ')[0] || 'there';
+  const car     = gv('fu-car') || 'the car';
+  const obj     = gv('fu-obj');
+  const status  = gv('fu-status')      || 'New lead';
+  const timing  = gv('fu-timing')      || 'Next day';
+  const tone    = gv('fu-tone')        || 'Friendly';
+  const interact= gv('fu-interaction') || 'visit';
+
+  const btn = el('fuBtn');
+  btn.innerHTML = '<div class="spinner"></div> Generating...'; btn.classList.add('loading');
+
+  const input = { name, firstName: fn, car, objection: obj, status, timing, tone, lastInteraction: interact };
+
+  apexAI('followup', input).then(gpt => {
+    // ── Apply result (GPT or local fallback) ──
+    function applyLocal() {
+      const greet = { Friendly: `Hi ${fn}! 😊`, Professional: `Hi ${fn},`, Urgent: `Hi ${fn}! ⚡`, 'Soft reminder': `Hi ${fn} 👋`, 'Premium consultant': `Good day, ${fn}.` }[tone] || `Hi ${fn}!`;
+      const ctx   = { 'Walk-in': `It was great having you visit our showroom earlier`, 'Test drive': `Thank you for coming down for the test drive today — hope you enjoyed the feel of the ${car}`, 'Phone call': `Thanks for taking the time to chat with me earlier`, 'WhatsApp': `Thanks for reaching out about the ${car}`, 'Viewing': `Thank you for viewing the ${car} with us`, 'Quotation sent': `Thank you — I\'ve sent over the quotation for the ${car}` }[interact] || `Thank you for connecting with me about the ${car}`;
+      const closing = { Friendly: `Looking forward to hearing from you! 😊`, Professional: `Please feel free to reach out at your convenience.`, Urgent: `Units are moving fast — just say the word. ⚡`, 'Soft reminder': `No rush — just here whenever you\'re ready. 🙂`, 'Premium consultant': `I\'ll ensure the experience is seamless. Do let me know how you\'d like to proceed.` }[tone] || `Looking forward to hearing from you!`;
+      let objLine = '';
+      if (obj) { const ol = obj.toLowerCase(); if (ol.includes('price')||ol.includes('expensive')) objLine = `\n\nRegarding the price — I\'ve looked into options that might bring the monthly instalment to a more comfortable range.`; else if (ol.includes('wife')||ol.includes('spouse')) objLine = `\n\nI completely understand — this is a family decision. I\'d love to invite both of you in together.`; else objLine = `\n\nI also wanted to follow up on the concern you mentioned — happy to go through it whenever you\'re ready.`; }
+      el('fu-main').textContent   = `${greet}\n\n${ctx}.\n\n${status === 'Ghosted' ? `I know you\'re probably busy — just a quick check-in on the ${car}. No pressure either way.` : status === 'Ready to buy' ? `I\'m ready on my side — just need your confirmation to lock in the unit. Shall we get this done? 😊` : `I wanted to share a bit more about the ${car} and see if I can answer any questions.`}${objLine}\n\n${closing}\n\n– [Your name] | [Dealership]`;
+      el('fu-short').textContent  = `${greet} Just checking in on the ${car} — any questions I can help with? ${tone === 'Urgent' ? 'Units moving fast! ⚡' : 'Happy to assist anytime. 😊'}\n\n– [Your name]`;
+      el('fu-strong').textContent = `${greet}\n\nI\'ll be upfront — I\'d really like to help you drive home in the ${car}, and I\'ll do my best to make the numbers work.\n\nWhat would it take for you to say yes? Tell me and I\'ll do my best.\n\n– [Your name]`;
+      const stepsMap = { 'Ghosted': ['Send the short version first — no pressure.','Wait 2 days. If no reply, send the strong closing version.','After 5 days, send a final message and give them an easy out.'], 'Comparing': ['Send the main message today to stay top of mind.','Offer a specific differentiator — not just a price drop.','Follow up in 3 days if no reply, then weekly.'], 'Ready to buy': ['Send within the hour — strike while intent is hot.','Confirm unit, colour, and delivery date in the same message.','Follow up with a payment and paperwork checklist.'], default: ['Send the main message at the recommended time.','If no reply within 2 days, use the shorter version.','After a week of silence, switch to the stronger closing version.'] };
+      const steps = stepsMap[status] || stepsMap['default'];
+      el('fu-strategy').innerHTML = steps.map((s,i) => `<div class="sc" style="margin-bottom:${i<steps.length-1?'7px':'0'}"><div class="sn">Step ${i+1}</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s}</div></div>`).join('');
+      const timeMap = { 'Same day': '🕐 Send between 7–8 PM tonight.', 'Next day': '🕛 Send between 12–1 PM tomorrow — lunchtime is ideal.', '3 days later': '🕙 Tuesday or Wednesday, 10–11 AM.', '1 week later': '🕚 Monday or Tuesday at 11 AM.' };
+      el('fu-timing-out').textContent = timeMap[timing] || 'Send between 12–1 PM or 7–8 PM for best results.';
+      const dontMap = { 'Ghosted': ["Don\'t say \"Just checking in again\" — signals desperation","Don\'t send 3 messages without a reply","Don\'t guilt-trip them"], 'Comparing': ["Don\'t immediately offer a discount","Don\'t say \"We are the cheapest\"","Don\'t pressure them to decide today"], 'Ready to buy': ["Don\'t delay your reply — respond within the hour","Don\'t add new information","Don\'t change the offer — it creates doubt"], default: ["Don\'t start with \"Sorry to bother you\"","Don\'t send a wall of text","Don\'t ask \"Are you still interested?\""] };
+      const donts = dontMap[status] || dontMap['default'];
+      el('fu-donts').innerHTML = `<div class="wh">⚠️ Avoid these</div>` + donts.map(d => `<div class="wm" style="margin-bottom:4px">✕ ${d}</div>`).join('');
+    }
+
+    if (gpt) {
+      el('fu-main').textContent   = gpt.mainMsg   || '';
+      el('fu-short').textContent  = gpt.shortMsg  || '';
+      el('fu-strong').textContent = gpt.strongMsg || '';
+      const steps = gpt.strategy || [];
+      el('fu-strategy').innerHTML = steps.map((s,i) => `<div class="sc" style="margin-bottom:${i<steps.length-1?'7px':'0'}"><div class="sn">Step ${i+1}</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s}</div></div>`).join('');
+      el('fu-timing-out').textContent = gpt.bestTime || '';
+      const donts = gpt.donts || [];
+      el('fu-donts').innerHTML = `<div class="wh">⚠️ Avoid these</div>` + donts.map(d => `<div class="wm" style="margin-bottom:4px">✕ ${d}</div>`).join('');
+    } else { applyLocal(); }
+
+    ['cp-main','cp-short','cp-strong'].forEach(id => { const b = el(id); if(b){b.innerHTML = '&#128203; Copy'; b.classList.remove('ok');} });
+    btn.innerHTML = '&#128172; Generate messages'; btn.classList.remove('loading');
+    el('fu-results').style.display = '';
+    el('fu-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 4: FINANCE CALCULATOR
+// ════════════════════════════════════════════════════════════════
+
+let _autoLoan = true;
+
+function autoLoan() {
+  const p = gn('c-price'), d = gn('c-dp');
+  if (p > 0 && d >= 0 && _autoLoan) el('c-loan').value = Math.max(0, p - d);
+}
+function clearAutoLoan() { _autoLoan = false; }
+function resetCalc() {
+  ['c-price','c-dp','c-loan','c-balloon','c-fee','c-ins','c-roadtax'].forEach(id => { const e = el(id); if (e) e.value = ''; });
+  el('c-rate').value = '2.8'; el('c-tenure').value = '7';
+  el('calc-results').style.display = 'none'; _autoLoan = true;
+}
+
+function calcInstalment(loan, rate, years, balloon) {
+  balloon = balloon || 0;
+  const principal = loan - balloon;
+  const interest  = principal * (rate / 100) * years;
+  const monthly   = (principal * (1 + (rate / 100) * years)) / (years * 12);
+  return { monthly: Math.round(monthly), totalInterest: Math.round(interest), totalRepay: Math.round(principal + interest + balloon) };
+}
+
+function runCalc() {
+  const price = gn('c-price'), dp = gn('c-dp');
+  let loan = gn('c-loan');
+  if (!loan && price && dp >= 0) loan = Math.max(0, price - dp);
+  if (!loan) { showToast('Enter a loan amount or vehicle price + downpayment'); return; }
+  const rate = gn('c-rate') || 2.8, years = parseInt(el('c-tenure').value) || 7;
+  const balloon = gn('c-balloon'), fee = gn('c-fee'), ins = gn('c-ins'), roadtax = gn('c-roadtax');
+  const r = calcInstalment(loan, rate, years, balloon);
+  const upfront = dp + fee + ins + roadtax;
+
+  el('cr-monthly').textContent  = sgd(r.monthly);
+  el('cr-sub').textContent      = `Over ${years} year${years > 1 ? 's' : ''} at ${rate}% p.a.`;
+  el('cr-loan').textContent     = sgd(loan);
+  el('cr-interest').textContent = sgd(r.totalInterest);
+  el('cr-total').textContent    = sgd(r.totalRepay);
+  el('cr-upfront').textContent  = sgd(upfront || dp);
+  const parts = [];
+  if (dp)      parts.push(`DP ${sgd(dp)}`);
+  if (fee)     parts.push(`fees ${sgd(fee)}`);
+  if (ins)     parts.push(`insurance ${sgd(ins)}`);
+  if (roadtax) parts.push(`road tax ${sgd(roadtax)}`);
+  el('cr-upfront-sub').textContent = parts.join(' + ') || '';
+
+  const daily = Math.round(r.monthly / 30);
+  let ft = `For ${price ? 'a ' + sgd(price) + ' vehicle' : 'this vehicle'}, your customer pays ${sgd(r.monthly)} every month for ${years} years`;
+  if (balloon) ft += `, then a final balloon payment of ${sgd(balloon)}`;
+  ft += `. Total repayment: ${sgd(r.totalRepay)} — of which ${sgd(r.totalInterest)} is interest. That's about ${sgd(daily)} per day.`;
+  if (upfront > 0) ft += ` They need ${sgd(upfront)} ready on collection day.`;
+  el('cr-friendly').innerHTML = `<p>${ft}</p>`;
+
+  const baseDp = dp || Math.round(loan * 0.2);
+  el('cr-scenarios').innerHTML = [
+    { l: 'Option A', desc: 'Lower upfront',      dp: Math.max(0, baseDp - 10000) },
+    { l: 'Option B', desc: 'Your numbers',        dp: baseDp, hl: true },
+    { l: 'Option C', desc: 'Higher downpayment',  dp: baseDp + 10000 }
+  ].map(sc => {
+    const scLoan = Math.max(0, loan + (baseDp - sc.dp));
+    const sr = calcInstalment(scLoan, rate, years, balloon);
+    return `<div class="scc${sc.hl ? ' hl' : ''}">
+      ${sc.hl ? '<span class="scb">Your numbers</span>' : ''}
+      <div class="scl">${sc.l}</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:3px">${sc.desc}</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:5px">DP ${sgd(sc.dp)}</div>
+      <div class="scm">${sgd(sr.monthly)}</div>
+      <div style="font-size:9px;color:var(--muted)">/month</div>
+      <div class="sct">Total: ${sgd(sr.totalRepay)}</div>
+    </div>`;
+  }).join('');
+  el('calc-results').style.display = '';
+  el('calc-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 5: COMPETITOR COMPARISON ENGINE
+// ════════════════════════════════════════════════════════════════
+
+function runCompare() {
+  const o = { model: gv('o-model'),  year: gn('o-year'),  price: gn('o-price'),  mileage: gn('o-mileage'),
+              coe: gv('o-coe'),       owners: gn('o-owners'), warranty: gv('o-warranty'),
+              roadtax: gn('o-roadtax'), depr: gn('o-depr'), notes: gv('o-notes') };
+  const c = { model: gv('c2-model'), year: gn('c2-year'), price: gn('c2-price'), mileage: gn('c2-mileage'),
+              coe: gv('c2-coe'),      owners: gn('c2-owners'), warranty: gv('c2-warranty'),
+              roadtax: gn('c2-roadtax'), depr: gn('c2-depr'), notes: gv('c2-notes') };
+
+  if (!o.model && !c.model && !o.price && !c.price) { showToast('Please enter at least one car model or price to compare'); return; }
+
+  const btn = el('cmpBtn');
+  btn.innerHTML = '<div class="spinner"></div> Comparing...'; btn.disabled = true;
+
+  setTimeout(() => {
+    let scoreO = 0, scoreC = 0, scoreTie = 0;
+    const rows = [], talkPts = [], risks = [];
+
+    // Helper: register one category comparison
+    // lowerBetter=true means lower value is better (price, mileage, owners, depreciation, roadtax)
+    function addRow(icon, label, oVal, cVal, lowerBetter, oDisp, cDisp) {
+      if (!oVal && !cVal) return null;
+      let winner = 'tie';
+      if (oVal && cVal) {
+        if (lowerBetter) winner = oVal < cVal ? 'ours' : oVal > cVal ? 'theirs' : 'tie';
+        else             winner = oVal > cVal ? 'ours' : oVal < cVal ? 'theirs' : 'tie';
+      } else if (oVal)  winner = 'ours';
+      else if (cVal)    winner = 'theirs';
+      if (winner === 'ours')   scoreO++;
+      else if (winner === 'theirs') scoreC++;
+      else scoreTie++;
+      rows.push({ icon, label, oDisp: oDisp || String(oVal || '—'), cDisp: cDisp || String(cVal || '—'), winner });
+      return winner;
+    }
+
+    const priceWin   = addRow('💰', 'Price',             o.price,   c.price,   true,  o.price   ? sgd(o.price)   : '—', c.price   ? sgd(c.price)   : '—');
+    const deprWin    = addRow('📉', 'Depreciation / yr', o.depr,    c.depr,    true,  o.depr    ? sgd(o.depr)+'/yr' : '—', c.depr ? sgd(c.depr)+'/yr' : '—');
+    const mileWin    = addRow('🛣️', 'Mileage',           o.mileage, c.mileage, true,  o.mileage ? o.mileage.toLocaleString()+'km' : '—', c.mileage ? c.mileage.toLocaleString()+'km' : '—');
+    const yearWin    = addRow('📅', 'Year',               o.year,    c.year,    false, o.year    || '—', c.year    || '—');
+    const ownWin     = addRow('👤', 'No. of owners',     o.owners,  c.owners,  true,
+      o.owners ? o.owners + (o.owners === 1 ? ' owner' : ' owners') : '—',
+      c.owners ? c.owners + (c.owners === 1 ? ' owner' : ' owners') : '—');
+    addRow('🗒️', 'Road tax / yr', o.roadtax, c.roadtax, true, o.roadtax ? sgd(o.roadtax) : '—', c.roadtax ? sgd(c.roadtax) : '—');
+
+    // Warranty — parse leading integer, higher = better
+    if (o.warranty || c.warranty) {
+      const oW = parseInt(o.warranty) || (o.warranty ? 1 : 0);
+      const cW = parseInt(c.warranty) || (c.warranty ? 1 : 0);
+      addRow('🛡️', 'Warranty', oW, cW, false, o.warranty || '—', c.warranty || '—');
+    }
+
+    // ── Score summary ──
+    el('cmp-score-row').innerHTML = `
+      <div class="sbox o"><div class="snum">${scoreO}</div><div class="slbl">Our car wins</div></div>
+      <div class="sbox e"><div class="snum">${scoreTie}</div><div class="slbl">Tied</div></div>
+      <div class="sbox t"><div class="snum">${scoreC}</div><div class="slbl">Competitor wins</div></div>`;
+
+    // ── Head-to-head table ──
+    el('cmp-table').innerHTML = rows.map(r => {
+      const cls = r.winner === 'ours' ? 'g' : r.winner === 'theirs' ? 'r' : 'e';
+      const tag = r.winner === 'ours' ? '✅ Us' : r.winner === 'theirs' ? '⚠️ Them' : '🟡 Tie';
+      return `<div class="crow">
+        <div class="cion">${r.icon}</div>
+        <div class="clbl">${r.label}</div>
+        <div class="cov">${r.oDisp}</div>
+        <div class="ctv">${r.cDisp}</div>
+        <div class="cwin ${cls}">${tag}</div>
+      </div>`;
+    }).join('');
+
+    // ── Overall winner ──
+    const oName = o.model || 'Our car', cName = c.model || 'Competitor';
+    let oCls, oWinner, oReason;
+    if (scoreO > scoreC) {
+      oCls = 'g'; oWinner = '✅ ' + oName;
+      oReason = `Wins ${scoreO} of ${scoreO + scoreC + scoreTie} compared categories. Stronger overall value for the customer despite any price difference.`;
+    } else if (scoreC > scoreO) {
+      oCls = 'r'; oWinner = '⚠️ ' + cName;
+      oReason = `Competitor wins ${scoreC} of ${scoreO + scoreC + scoreTie} categories. Be ready with strong justifications — focus on trust, aftersales, and value beyond the numbers.`;
+    } else {
+      oCls = 'e'; oWinner = '🟡 Evenly matched';
+      oReason = 'Both cars are competitive across key categories. The decision will likely come down to trust, dealership experience, and relationship quality.';
+    }
+    const oc = el('cmp-overall');
+    oc.className = 'oc ' + oCls;
+    el('cmp-overall-winner').textContent = oWinner;
+    el('cmp-overall-reason').textContent = oReason;
+
+    // ── Talking points (where we win or have an advantage) ──
+    if (priceWin === 'ours' && o.price && c.price)
+      talkPts.push(`Our price is ${sgd(c.price - o.price)} lower than the competitor — that's immediate, visible savings for the customer.`);
+    if (priceWin === 'theirs' && deprWin === 'ours' && o.depr && c.depr)
+      talkPts.push(`Although ${oName} is priced ${sgd(o.price - c.price)} higher, the annual depreciation is ${sgd(c.depr - o.depr)} lower — meaning the customer saves money over the full ownership period.`);
+    if (mileWin === 'ours' && o.mileage && c.mileage)
+      talkPts.push(`Our car has ${(c.mileage - o.mileage).toLocaleString()}km less mileage — less engine wear, lower maintenance risk, and better resale value down the line.`);
+    if (ownWin === 'ours' && o.owners && c.owners)
+      talkPts.push(`${oName} has only ${o.owners} previous owner${o.owners > 1 ? 's' : ''} versus ${c.owners} — fewer owners typically means better care history and a more predictable condition.`);
+    if (yearWin === 'ours' && o.year && c.year)
+      talkPts.push(`${oName} is a ${o.year} versus the competitor's ${c.year} — a newer car means updated safety features, newer engine technology, and more remaining useful life.`);
+    if (o.warranty && (!c.warranty || (parseInt(o.warranty)||1) > (parseInt(c.warranty)||0)))
+      talkPts.push(`Our warranty — ${o.warranty} — gives the customer real post-purchase protection that the competitor simply cannot match.`);
+    if (o.notes)
+      talkPts.push(`We also include: ${o.notes}. These are real extras the competitor is not offering.`);
+    if (talkPts.length === 0)
+      talkPts.push(`Our car offers comparable or superior value across all key categories. The strongest selling point is our aftersales service, reliability, and the trust customers place in our dealership.`);
+
+    el('cmp-talking').innerHTML = talkPts.map(t =>
+      `<div class="tpi"><span style="flex-shrink:0">✅</span><span>${t}</span></div>`
+    ).join('');
+
+    // ── Risk areas (where competitor wins or we have gaps) ──
+    if (priceWin === 'theirs' && o.price && c.price)
+      risks.push(`Price gap of ${sgd(o.price - c.price)} — be ready to justify this with depreciation savings, warranty coverage, lower mileage, or extra inclusions.`);
+    if (mileWin === 'theirs' && o.mileage && c.mileage)
+      risks.push(`Our car has higher mileage (${o.mileage.toLocaleString()}km vs ${c.mileage.toLocaleString()}km). Address this by highlighting full service history and a condition report.`);
+    if (ownWin === 'theirs' && o.owners && c.owners)
+      risks.push(`More previous owners than the competitor. Have service records ready to demonstrate consistent maintenance and care.`);
+    if (deprWin === 'theirs' && o.depr && c.depr)
+      risks.push(`Our depreciation is SGD ${(o.depr - c.depr).toLocaleString()}/yr higher. If the customer raises this, redirect to total monthly cost of ownership and included benefits.`);
+    if (!o.warranty && c.warranty)
+      risks.push(`Competitor has a stated warranty and ours is not clearly defined. Clarify your warranty offering before the customer raises it.`);
+    if (c.notes)
+      risks.push(`Competitor notes worth knowing: ${c.notes}`);
+    if (risks.length === 0)
+      risks.push(`No significant risk areas detected based on entered data. Maintain your position and focus on relationship quality and after-sales trust.`);
+
+    el('cmp-risks').innerHTML = risks.map(r =>
+      `<div class="rki"><span style="flex-shrink:0">⚠️</span><span>${r}</span></div>`
+    ).join('');
+
+    // ── Suggested response to "another dealer is cheaper" ──
+    let cheaper = '';
+    if (o.price && c.price && o.price > c.price) {
+      const diff = o.price - c.price;
+      cheaper = `"I completely understand — and I appreciate you being upfront with me. A ${sgd(diff)} difference looks significant on paper, but let me show you what you're actually getting for that difference."`;
+      if (deprWin === 'ours' && o.depr && c.depr)
+        cheaper += ` "Our car depreciates ${sgd(c.depr - o.depr)} less per year — so over a few years of ownership, you're actually financially better off with us."`;
+      if (mileWin === 'ours' && o.mileage && c.mileage)
+        cheaper += ` "Their car also has ${(c.mileage - o.mileage).toLocaleString()}km more mileage — that's hidden maintenance costs you haven't factored in yet."`;
+      if (o.warranty)
+        cheaper += ` "And our ${o.warranty} warranty means zero surprise repair bills during that period — that alone is worth thousands."`;
+      cheaper += ` "I want you to make the right decision — not just the cheapest one. Can I show you the full cost comparison side by side?"`;
+    } else {
+      cheaper = `"I appreciate you sharing that — let me be transparent with you. Our price reflects the full value we're offering: ${talkPts[0] || 'quality, service history, and after-sales support'}. I'd rather you pay the right price once than pay less and face surprises later. Can we sit down and go through the details together?"`;
+    }
+    el('cmp-cheaper').textContent = cheaper;
+
+    // ── WhatsApp comparison message ──
+    const waLines = talkPts.slice(0, 2).map(t => '• ' + (t.length > 100 ? t.substring(0, 97) + '...' : t));
+    el('cmp-wa').textContent =
+      `Hi! Just a quick follow-up on the ${oName} vs ${cName} we discussed. 🚗\n\n` +
+      `Here's a quick snapshot of why our car makes more sense for you:\n\n` +
+      waLines.join('\n') +
+      `\n\nHappy to sit down and go through a full side-by-side comparison — it takes 10 minutes and could save you thousands. 😊\n\nWhen's a good time for you?\n\n– [Your name] | [Dealership]`;
+    el('cp-cmp').innerHTML = '&#128203; Copy'; el('cp-cmp').classList.remove('ok');
+
+    btn.innerHTML = '&#9878;&#65039; Compare offers'; btn.disabled = false;
+    el('cmp-results').style.display = '';
+    el('cmp-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 900);
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 6: CUSTOMER HISTORY
+// ════════════════════════════════════════════════════════════════
+
+function renderHistory() {
+  const q = (el('search-input').value || '').toLowerCase();
+  const all = loadDB();
+  const filtered = q
+    ? all.filter(c =>
+        (c.input.name      || '').toLowerCase().includes(q) ||
+        (c.input.car       || '').toLowerCase().includes(q) ||
+        (c.input.objection || '').toLowerCase().includes(q))
+    : all;
+
+  const sr = el('stats-row');
+  if (all.length > 0) {
+    sr.style.display = '';
+    el('stat-total').textContent = all.length;
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    el('stat-week').textContent  = all.filter(c => c.ts > weekAgo).length;
+    el('stat-high').textContent  = all.filter(c => c.result && c.result.risk === 'High').length;
+  } else { sr.style.display = 'none'; }
+
+  const list = el('history-list');
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="es"><div style="font-size:40px">👥</div><p>${all.length === 0 ? 'No deals yet.<br>Start your first customer conversation to begin building your Apex Memory.' : 'No results match your search.'}</p></div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.slice().reverse().map(c => {
+    const inp = c.input || {}, res = c.result || {}, prof = res.profile || {};
+    const risk = res.risk || '—';
+    const dateStr = new Date(c.ts).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' });
+    const budget  = inp.budget ? sgd(parseInt(inp.budget)) : '—';
+    return `<div class="hc" onclick="openDetail('${c.id}')">
+      <div class="hct">
+        <div class="hav">${initials(inp.name)}</div>
+        <div style="flex:1;min-width:0"><div class="hn">${inp.name || 'Unnamed'}</div><div class="hd">${dateStr}</div></div>
+        <span class="rp" style="${riskStyle(risk)}">${risk}</span>
+      </div>
+      <div class="plg">
+        <div class="pl"><div class="pll">Car</div><div class="plv">${inp.car || '—'}</div></div>
+        <div class="pl"><div class="pll">Budget</div><div class="plv">${budget}</div></div>
+        <div class="pl"><div class="pll">Buying stage</div><div class="plv">${prof.stage || '—'}</div></div>
+        <div class="pl"><div class="pll">Closing prob.</div><div class="plv">${prof.prob != null ? prof.prob + '%' : '—'}</div></div>
+      </div>
+      <div class="hf">
+        <span style="font-size:11px;color:var(--muted)">${inp.timeline || 'Timeline unknown'}</span>
+        <button class="dlb" onclick="event.stopPropagation();showConfirm('${c.id}')">🗑 Delete</button>
+      </div>
+      <div class="cfb" id="confirm-${c.id}">
+        <p>Delete ${inp.name || 'this customer'}? This cannot be undone.</p>
+        <div class="cfr">
+          <button class="yb"  onclick="event.stopPropagation();deleteCustomer('${c.id}')">Yes, delete</button>
+          <button class="nob" onclick="event.stopPropagation();hideConfirm('${c.id}')">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function showConfirm(id) { const e = el('confirm-'+id); if (e) e.style.display = 'block'; }
+function hideConfirm(id) { const e = el('confirm-'+id); if (e) e.style.display = 'none'; }
+function deleteCustomer(id) {
+  saveDB(loadDB().filter(c => c.id !== id));
+  showToast('Customer deleted'); updateBadge(); renderHistory();
+}
+function backToList() {
+  el('hv-list').style.display = ''; el('hv-detail').style.display = 'none';
+}
+
+function openDetail(id) {
+  const c = loadDB().find(x => x.id === id);
+  if (!c) return;
+  el('hv-list').style.display = 'none'; el('hv-detail').style.display = '';
+
+  const inp = c.input || {}, res = c.result || {}, prof = res.profile || {};
+  const risk = res.risk || '—', rc = risk === 'High' ? 'rh' : risk === 'Medium' ? 'rm' : 'rl';
+  const dateStr = new Date(c.ts).toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  const pItems = [
+    pill('Name', inp.name), pill('Car', inp.car), pill('Motivation', inp.motivation), pill('Timeline', inp.timeline),
+    pill('Budget',    inp.budget  ? sgd(parseInt(inp.budget))  : ''),
+    pill('Downpayment', inp.dp   ? sgd(parseInt(inp.dp))      : ''),
+    pill('Monthly',   inp.monthly ? sgd(parseInt(inp.monthly)) + '/mo' : ''),
+    pill('Tenure', inp.tenure), pill('Trade-in', inp.tradein), pill('Viewed', inp.showrooms)
+  ].join('');
+
+  const pH = prof.prob != null
+    ? `<div class="prob-wrap" style="margin-bottom:0"><div class="prob-row"><span class="prob-lbl">Closing probability</span><span class="prob-num">${prof.prob}%</span></div><div class="prob-track"><div class="prob-bar" style="width:${prof.prob}%;background:${prof.probColor||'var(--blue)'}"></div></div></div>` : '';
+
+  const cH = (res.concerns  || []).map(c => `<div class="cc"><div class="cdot" style="background:${c.dot}"></div><div><div class="ct">${c.text}</div><div class="cs">${c.sub}</div></div></div>`).join('');
+  const qH = (res.questions || []).map((q,i) => `<div class="qc"><div class="qn">${i+1}</div><div class="qt">${q}</div></div>`).join('');
+  const wH = (res.warnings  || []).map(w => `<div class="wc"><div class="wh">⚠️ Warning</div><div class="wm">${w.main}</div><div class="wr">Reason: ${w.why}</div></div>`).join('');
+  const sH = (res.strategy  || []).map((s,i) => `<div class="sc"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`).join('');
+
+  el('detail-wrap').innerHTML = `
+    <div class="dh">
+      <div class="hav" style="width:44px;height:44px;font-size:14px">${initials(inp.name)}</div>
+      <div style="flex:1"><div style="font-size:15px;font-weight:700;color:var(--text)">${inp.name||'Unnamed'}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${dateStr}</div></div>
+      <span class="rp" style="${riskStyle(risk)}">${risk}</span>
+    </div>
+    ${prof.type ? `<div class="seg">AI Customer Profile</div>
+    <div class="sec" style="padding:1rem">
+      <div class="pg">
+        <div class="pc"><span class="pci">${prof.typeIcon||''}</span><div class="pcl">Customer type</div><div class="pcv">${prof.type}</div></div>
+        <div class="pc"><span class="pci">${prof.stageIcon||''}</span><div class="pcl">Buying stage</div><div class="pcv">${prof.stage}</div></div>
+        <div class="pc"><span class="pci">${prof.trustIcon||''}</span><div class="pcl">Trust level</div><div class="pcv">${prof.trust}</div></div>
+        <div class="pc"><span class="pci">&#127919;</span><div class="pcl">Urgency</div><div class="pcv">${prof.urgency}</div></div>
+      </div>${pH}</div>` : ''}
+    ${cH ? `<div class="seg">Hidden Concerns</div>${cH}` : ''}
+    ${qH ? `<div class="seg">Next Questions</div>${qH}` : ''}
+    ${wH ? `<div class="seg">What Not to Do</div>${wH}` : ''}
+    ${sH ? `<div class="seg">Best Sales Strategy</div>${sH}` : ''}
+    ${res.whatsapp ? `<div class="seg">WhatsApp Follow-up</div><div class="sec" style="padding:1rem"><div class="bub">${res.whatsapp}</div></div>` : ''}
+    <div class="seg">Full Analysis</div>
+    <div class="rs"><h3>Buyer profile</h3><div class="plg">${pItems}</div></div>
+    ${res.concern  ? `<div class="rs"><h3>Concern detail</h3><p>${res.concern}</p></div>` : ''}
+    ${res.resp     ? `<div class="rs"><h3>Suggested response</h3><p>${res.resp}</p></div>` : ''}
+    ${res.discount ? `<div class="rs"><h3>Discount handling</h3><p>${res.discount}</p></div>` : ''}
+    ${res.finance  ? `<div class="rs"><h3>Finance explanation</h3><p>${res.finance}</p></div>` : ''}
+    ${res.trust    ? `<div class="rs"><h3>Trust-building</h3><ul>${res.trust.map(t=>`<li>${t}</li>`).join('')}</ul></div>` : ''}
+    ${inp.objection? `<div class="rs"><h3>Objection heard</h3><p>${inp.objection}</p></div>` : ''}
+    ${inp.notes    ? `<div class="rs"><h3>Notes</h3><p>${inp.notes}</p></div>` : ''}
+    <div class="rs"><h3>Deal risk</h3><span class="rbadge ${rc}">${risk} risk</span>${res.riskReason ? `<p style="margin-top:8px">${res.riskReason}</p>` : ''}</div>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 6b: VEHICLE MATCH ENGINE
+// ════════════════════════════════════════════════════════════════
+
+const VM_KEY = 'apex_vm_history_v1';
+function loadVMH()    { try { return JSON.parse(localStorage.getItem(VM_KEY) || '[]'); } catch(e) { return []; } }
+function saveVMH(arr) { try { localStorage.setItem(VM_KEY, JSON.stringify(arr)); } catch(e) {} }
+
+// Chip state tracking
+const _vmState = { 'vm-type': null, 'vm-condition': null, 'vm-family': null, 'vm-driving': null, 'vm-priority': null, 'vm-pref': [] };
+
+function vm_toggle(btn, group, val) {
+  document.querySelectorAll(`#${group}-chips .vm-chip`).forEach(c => c.classList.remove('active'));
+  if (_vmState[group] === val) { _vmState[group] = null; }
+  else { _vmState[group] = val; btn.classList.add('active'); }
+}
+
+function vm_multi(btn, group, val) {
+  const arr = _vmState[group];
+  if (btn.classList.contains('active')) {
+    btn.classList.remove('active');
+    _vmState[group] = arr.filter(v => v !== val);
+  } else {
+    if (arr.length >= 3) { showToast('Choose up to 3 preferences'); return; }
+    btn.classList.add('active');
+    _vmState[group] = [...arr, val];
+  }
+}
+
+// ── Vehicle database (Singapore-market focused) ──
+const VM_VEHICLES = [
+  // Sedans
+  { name:'Toyota Camry 2.5 Hybrid', type:'Sedan', segment:'Mid-size sedan', new:true, used:true,
+    budgetMin:120000, budgetMax:160000, depr:9500, monthly0:1650,
+    family:[2,3,4], driving:['Short','Medium','Long'], prefs:['Reliability','Fuel Economy','Technology'],
+    priorities:['Lowest Depreciation','Best Value','Reliability'],
+    pros:['Exceptional reliability record','Hybrid saves on fuel','Smooth comfortable ride','Strong resale value'],
+    cons:['Larger than some buyers need','Limited boot space vs SUV','Not exciting to drive'],
+    ideal:'Professionals and families who want a reliable, fuel-efficient car with strong resale value.',
+    avoid:'Performance-seekers or buyers who need high ground clearance. Also not ideal for large families needing 3-row seating.',
+    objections:['Price is higher than Korean alternatives','Some find interior design conservative'],
+    tags:['Fuel Economy','Reliability','Low Depreciation']
+  },
+  { name:'Honda Accord 1.5T', type:'Sedan', segment:'Mid-size sedan', new:true, used:true,
+    budgetMin:105000, budgetMax:145000, depr:9000, monthly0:1500,
+    family:[2,3,4], driving:['Short','Medium','Long'], prefs:['Technology','Reliability','Fuel Economy'],
+    priorities:['Best Value','Reliability','Lowest Monthly Payment'],
+    pros:['Spacious interior for its class','Strong tech features','Turbocharged engine feels brisk','Honda reliability reputation'],
+    cons:['Depreciation slightly higher than Toyota','Turbocharged engine needs premium fuel','Some road noise at highway speed'],
+    ideal:'Buyers who want a well-rounded sedan with good tech and solid reliability at a reasonable price.',
+    avoid:'Buyers needing the absolute lowest depreciation — Toyota holds value better long-term.',
+    objections:['Turbo requires 95 RON fuel','Depreciation slightly worse than Camry'],
+    tags:['Technology','Reliability','Best Value']
+  },
+  // SUVs
+  { name:'Toyota Corolla Cross Hybrid', type:'SUV', segment:'Compact SUV', new:true, used:true,
+    budgetMin:115000, budgetMax:150000, depr:8500, monthly0:1580,
+    family:[2,3,4], driving:['Short','Medium'], prefs:['Fuel Economy','Reliability','Safety'],
+    priorities:['Lowest Depreciation','Best Value','Reliability'],
+    pros:['Hybrid fuel economy in SUV body','Toyota reliability and resale','TNGA platform — good ride quality','Safety features standard across all trims'],
+    cons:['Not as spacious as larger SUVs','Performance is modest','Some find styling conservative'],
+    ideal:'Families who want SUV practicality with sedan-like fuel costs and strong resale value.',
+    avoid:'Buyers who need towing capacity or off-road ability. Also not for performance enthusiasts.',
+    objections:['CVT gearbox feels uninvolving','Boot smaller than Honda Vezel'],
+    tags:['Fuel Economy','Safety','Reliability']
+  },
+  { name:'Honda Vezel 1.5 Hybrid', type:'SUV', segment:'Compact SUV', new:true, used:true,
+    budgetMin:105000, budgetMax:140000, depr:9000, monthly0:1480,
+    family:[2,3,4], driving:['Short','Medium'], prefs:['Fuel Economy','Technology','Family'],
+    priorities:['Best Value','Lowest Monthly Payment'],
+    pros:['Honda Sensing safety standard','Excellent interior space for class','Hybrid fuel efficiency','Sporty modern styling'],
+    cons:['Rear-wheel drive in e:HEV variant — not ideal for all roads','Engine note can be coarse when pushed','Slightly higher depreciation than Corolla Cross'],
+    ideal:'Young families or couples who want modern styling, good tech, and fuel efficiency in a compact SUV body.',
+    avoid:'Buyers who need maximum interior room — consider a larger SUV. Not for towing or heavy loads.',
+    objections:['Smaller boot than some rivals','E:HEV system unfamiliar to some buyers'],
+    tags:['Fuel Economy','Technology','Family']
+  },
+  { name:'Mazda CX-5 2.0 2WD', type:'SUV', segment:'Mid-size SUV', new:true, used:true,
+    budgetMin:120000, budgetMax:165000, depr:10500, monthly0:1700,
+    family:[2,3,4], driving:['Medium','Long'], prefs:['Brand','Technology','Performance'],
+    priorities:['Luxury','Performance','Best Value'],
+    pros:['Premium interior feel punching above price','SkyActiv engines fun to drive','BOSE sound system available','Class-leading driving dynamics'],
+    cons:['Higher depreciation than Japanese rivals','Smaller rear seats than class','Limited hybrid option currently'],
+    ideal:'Buyers who want a near-premium driving experience without paying luxury brand prices. Brand-conscious buyers who care about interior quality.',
+    avoid:'Pure fuel-economy seekers — non-hybrid loses out to Corolla Cross. Large families who need 7-seat capacity.',
+    objections:['No hybrid option currently','Depreciation higher than Toyota'],
+    tags:['Brand','Performance','Technology']
+  },
+  { name:'Kia Sportage 1.6T', type:'SUV', segment:'Mid-size SUV', new:true, used:true,
+    budgetMin:110000, budgetMax:148000, depr:11000, monthly0:1580,
+    family:[2,3,4,5], driving:['Short','Medium','Long'], prefs:['Technology','Safety','Family'],
+    priorities:['Best Value','Lowest Monthly Payment'],
+    pros:['Feature-loaded at competitive price','7-year manufacturer warranty','Strong safety ratings','Panoramic roof and 12.3" displays standard'],
+    cons:['Korean brand perceived as lower prestige','Depreciation higher than Japanese rivals','Dealer network smaller than Toyota/Honda'],
+    ideal:'Value-focused buyers who want maximum features per dollar. Families who prioritise safety features and space.',
+    avoid:'Buyers for whom brand prestige matters — Korean brands still face some perception gap in Singapore. Buyers prioritising resale value.',
+    objections:['Korean brand stigma vs Japanese','Resale value concern'],
+    tags:['Technology','Safety','Best Value']
+  },
+  // Hatchbacks
+  { name:'Toyota Yaris Cross 1.5 Hybrid', type:'Hatchback', segment:'Subcompact crossover', new:true, used:true,
+    budgetMin:90000, budgetMax:120000, depr:7500, monthly0:1250,
+    family:[1,2,3], driving:['Short','Medium'], prefs:['Fuel Economy','Reliability','Safety'],
+    priorities:['Lowest Monthly Payment','Lowest Depreciation','Reliability'],
+    pros:['Excellent value in smaller segment','Hybrid fuel economy ideal for city driving','Toyota reliability in compact package','Easy to park in Singapore'],
+    cons:['Limited space for larger families','Smaller boot capacity','Less highway comfort than larger cars'],
+    ideal:'Singles, couples, or small families who drive mainly in the city and want low running costs with strong reliability.',
+    avoid:'Families of 4+ who need space. Long-distance highway drivers who will find the ride tiring over extended periods.',
+    objections:['Small boot space','Less prestige than larger models'],
+    tags:['Fuel Economy','Reliability','Lowest Monthly Payment']
+  },
+  { name:'Mazda 2 1.5 Sedan', type:'Hatchback', segment:'Subcompact', new:true, used:true,
+    budgetMin:78000, budgetMax:100000, depr:7000, monthly0:1050,
+    family:[1,2], driving:['Short','Medium'], prefs:['Brand','Fuel Economy','Reliability'],
+    priorities:['Lowest Monthly Payment','Lowest Depreciation'],
+    pros:['Excellent handling and fun to drive','Premium feel above segment','Low running costs','Easy to park'],
+    cons:['Very small interior for family use','Limited features vs Korean rivals','Boot space is tight'],
+    ideal:'Singles or couples who want a premium-feeling small car with low costs and an engaging drive.',
+    avoid:'Families of any size, long-distance commuters, or anyone who needs to carry passengers regularly.',
+    objections:['Very small interior','Limited options for passengers'],
+    tags:['Brand','Fuel Economy','Lowest Monthly Payment']
+  },
+  // MPV
+  { name:'Toyota Voxy 2.0', type:'MPV', segment:'7-seat MPV', new:true, used:true,
+    budgetMin:130000, budgetMax:175000, depr:9000, monthly0:1800,
+    family:[4,5], driving:['Short','Medium','Long'], prefs:['Family','Reliability','Safety'],
+    priorities:['Reliability','Best Value','Lowest Depreciation'],
+    pros:['7 seats with genuine 3rd row usability','Toyota reliability','Power sliding doors','Strong family reputation in Singapore'],
+    cons:['Thirstier than hybrids','Not dynamic to drive','Higher COE category potentially'],
+    ideal:'Families of 5 or more who need genuine 7-seat capacity with the reassurance of Toyota reliability.',
+    avoid:'Couples or small families — too large and thirsty for their needs. Urban drivers who will struggle with parking.',
+    objections:['Higher fuel cost than hybrids','Bulky to park in HDB'],
+    tags:['Family','Reliability','Safety']
+  },
+  { name:'Kia Carnival 2.2 Diesel', type:'MPV', segment:'Premium MPV', new:true, used:true,
+    budgetMin:145000, budgetMax:200000, depr:11500, monthly0:2050,
+    family:[4,5], driving:['Medium','Long'], prefs:['Family','Luxury','Technology'],
+    priorities:['Luxury','Reliability','Performance'],
+    pros:['Extremely spacious premium interior','Diesel economy excellent for long trips','Lounge-like seating','Impressive feature set'],
+    cons:['Higher depreciation','Diesel requires more maintenance','Larger footprint difficult in city'],
+    ideal:'Larger families who want premium MPV comfort and regularly travel longer distances. Business families who entertain in the car.',
+    avoid:'City-only drivers — Diesel advantage is reduced in stop-start traffic. Buyers prioritising resale value.',
+    objections:['Diesel servicing more expensive','High depreciation vs Toyota MPV'],
+    tags:['Family','Luxury','Technology']
+  },
+  // Sports / Luxury
+  { name:'BMW 330i M Sport', type:'Luxury', segment:'Luxury sedan', new:true, used:true,
+    budgetMin:220000, budgetMax:320000, depr:22000, monthly0:3200,
+    family:[1,2,3], driving:['Medium','Long'], prefs:['Performance','Brand','Technology'],
+    priorities:['Luxury','Performance','Best Value'],
+    pros:['Outstanding driving dynamics','Prestige brand recognition','Rich feature set','Strong after-sales network'],
+    cons:['Very high depreciation','Expensive servicing and parts','COE top bracket'],
+    ideal:'Professionals who value brand prestige and driving performance, and for whom monthly cost is secondary to status and experience.',
+    avoid:'Budget-conscious buyers — running costs are high. Buyers prioritising resale value or monthly payment minimisation.',
+    objections:['Very high depreciation','Servicing costs substantial'],
+    tags:['Brand','Performance','Luxury']
+  },
+  { name:'Mercedes-Benz C200 AMG Line', type:'Luxury', segment:'Luxury sedan', new:true, used:true,
+    budgetMin:230000, budgetMax:330000, depr:23000, monthly0:3350,
+    family:[1,2,3], driving:['Short','Medium','Long'], prefs:['Brand','Luxury','Technology'],
+    priorities:['Luxury','Performance'],
+    pros:['Premium cabin with MBUX system','Strong brand prestige','Comfortable long-distance cruiser','Wide dealer and service network'],
+    cons:['Highest depreciation in segment','Parts and service expensive','Resale value lower than domestic brands'],
+    ideal:'Status-conscious professionals for whom the Mercedes badge is a specific requirement. Buyers who value interior luxury above all.',
+    avoid:'Anyone concerned about depreciation or running costs. Families who need practicality over prestige.',
+    objections:['Highest depreciation in segment','Very expensive to service'],
+    tags:['Brand','Luxury','Technology']
+  },
+  { name:'Toyota GR86 2.4', type:'Sports', segment:'Sports coupe', new:true, used:true,
+    budgetMin:130000, budgetMax:170000, depr:11000, monthly0:1850,
+    family:[1,2], driving:['Short','Medium'], prefs:['Performance','Brand','Technology'],
+    priorities:['Performance','Best Value'],
+    pros:['Pure driving experience — rear-wheel drive','Naturally aspirated engine revs freely','Excellent weight balance','Toyota reliability in sports package'],
+    cons:['2+2 seating — not practical for families','Limited boot space','Fuel economy is secondary'],
+    ideal:'Driving enthusiasts who want a pure sports car experience with Toyota reliability. Singles or couples only.',
+    avoid:'Families of any size. Anyone who prioritises practicality, fuel economy, or low running costs.',
+    objections:['Only 2+2 seats','Fuel economy not a priority'],
+    tags:['Performance','Brand']
+  }
+];
+
+// ── Similarity data for "alternatives to" feature ──
+const VM_ALTERNATIVES = {
+  'vezel':    [{ name:'Toyota Corolla Cross Hybrid', why:'Same compact SUV segment, stronger depreciation and reliability record.' },
+               { name:'Mazda CX-30 2.0', why:'Premium feel, similar size, more engaging drive.' },
+               { name:'Kia Sportage 1.6T', why:'More space and features at a similar price point.' }],
+  'camry':    [{ name:'Honda Accord 1.5T', why:'Similar mid-size sedan, slightly more tech-forward.' },
+               { name:'Mazda 6 2.0', why:'More driving fun, comparable reliability.' },
+               { name:'Toyota Corolla 1.8 Hybrid', why:'Smaller budget needed, similar Toyota reliability.' }],
+  'cx-5':     [{ name:'Mazda CX-30 2.0', why:'Smaller and cheaper, same premium feel.' },
+               { name:'Kia Sportage 1.6T', why:'More features at lower cost.' },
+               { name:'Toyota RAV4 2.0', why:'More space, Toyota reliability.' }],
+  'vios':     [{ name:'Toyota Yaris Cross 1.5 Hybrid', why:'Crossover body, better fuel economy, similar budget.' },
+               { name:'Honda City 1.5', why:'More features, similar value.' },
+               { name:'Mazda 2 1.5 Sedan', why:'Better driving dynamics, premium interior feel.' }],
+  'voxy':     [{ name:'Kia Carnival 2.2 Diesel', why:'More premium interior, better long-distance comfort.' },
+               { name:'Toyota Sienta 1.5 Hybrid', why:'Smaller, easier to park, better fuel economy.' },
+               { name:'Honda BR-V 1.5', why:'Lower price point, seats 7 in smaller footprint.' }],
+  'default':  [{ name:'Toyota Corolla Cross Hybrid', why:'Consistently strong value, reliability, and resale in Singapore market.' },
+               { name:'Honda Vezel 1.5 Hybrid', why:'Best-in-class interior space for segment, modern tech.' },
+               { name:'Kia Sportage 1.6T', why:'Maximum features per dollar with 7-year warranty.' }]
+};
+
+function vm_getAlternatives(model) {
+  const m = model.toLowerCase();
+  for (const [k, v] of Object.entries(VM_ALTERNATIVES)) {
+    if (m.includes(k)) return v;
+  }
+  return VM_ALTERNATIVES['default'];
+}
+
+// ── Score a vehicle against customer profile ──
+function vm_scoreVehicle(v, profile) {
+  let score = 50, reasons = [];
+
+  // Budget match
+  const budget = parseInt(profile.budget) || 0;
+  if (budget > 0) {
+    if (budget >= v.budgetMin && budget <= v.budgetMax) { score += 20; reasons.push('Fits your budget comfortably'); }
+    else if (budget < v.budgetMin) { score -= 25; reasons.push('Slightly above your stated budget'); }
+    else { score += 10; reasons.push('Well within your budget'); }
+  }
+
+  // Type match
+  if (profile.type && profile.type !== 'Any') {
+    if (v.type === profile.type) { score += 15; reasons.push(`Matches your ${profile.type} preference`); }
+    else { score -= 10; }
+  }
+
+  // Family size
+  const fam = parseInt(profile.family) || 0;
+  if (fam > 0) {
+    if (v.family.includes(fam) || (fam >= 5 && v.family.includes(5))) { score += 10; reasons.push('Right size for your family'); }
+    else if (fam > Math.max(...v.family)) { score -= 15; reasons.push('May feel cramped for your family size'); }
+    else { score -= 5; }
+  }
+
+  // Preferences
+  const prefs = profile.pref || [];
+  prefs.forEach(p => { if (v.prefs.includes(p)) { score += 8; reasons.push(`Strong ${p.toLowerCase()} credentials`); } });
+
+  // Priority
+  if (profile.priority) {
+    if (v.priorities.includes(profile.priority)) { score += 12; reasons.push(`Aligns with your ${profile.priority} priority`); }
+    else { score -= 5; }
+  }
+
+  // Driving distance
+  if (profile.driving && v.driving.includes(profile.driving)) { score += 8; reasons.push(`Suits your ${profile.driving.toLowerCase()} daily commute`); }
+
+  // Condition
+  if (profile.condition === 'New' && !v.new) score -= 20;
+  if (profile.condition === 'Used' && !v.used) score -= 20;
+
+  score = Math.max(10, Math.min(98, score));
+  return { score, reasons: reasons.slice(0, 3) };
+}
+
+// ── Estimate monthly instalment ──
+function vm_monthly(vehicle, budget) {
+  const price = Math.min(vehicle.budgetMax, Math.max(vehicle.budgetMin, budget || (vehicle.budgetMin + vehicle.budgetMax) / 2));
+  const dp = price * 0.3;
+  const loan = price - dp;
+  return Math.round((loan * (1 + 0.028 * 7)) / (7 * 12));
+}
+
+let _lastVmProfile = null, _lastVmResults = null;
+
+function runVehicleMatch() {
+  const profile = {
+    budget:    gv('vm-budget'), type: _vmState['vm-type'],
+    pref:      [..._vmState['vm-pref']], condition: _vmState['vm-condition'],
+    family:    _vmState['vm-family'],   driving:   _vmState['vm-driving'],
+    priority:  _vmState['vm-priority'], specific:  gv('vm-specific')
+  };
+  const btn = el('vm-btn');
+  btn.innerHTML = '<div class="spinner"></div> Matching...'; btn.classList.add('loading');
+
+  apexAI('match', profile).then(gpt => {
+    let top5, talkingPoints, alts;
+
+    if (gpt && gpt.recommendations && gpt.recommendations.length) {
+      // GPT path
+      top5 = gpt.recommendations.slice(0,5);
+      talkingPoints = gpt.talkingPoints || [];
+      alts = gpt.alternatives || [];
+
+      el('vm-cards').innerHTML = top5.map((v,idx) => {
+        const scoreCls = v.score>=75?'':v.score>=55?'med':'low';
+        const barColor = v.score>=75?'var(--green)':v.score>=55?'var(--amb)':'var(--red)';
+        return `<div class="vm-match-card">
+          <div class="vm-match-header">
+            <div>
+              <div class="vm-match-rank">#${idx+1} recommendation</div>
+              <div class="vm-match-name">${v.name}</div>
+              <div class="vm-score-bar-bg"><div class="vm-score-bar" style="width:${v.score}%;background:${barColor}"></div></div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div class="vm-score-badge ${scoreCls}">${v.score}%</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px">${v.type||''} · ${v.segment||''}</div>
+            </div>
+          </div>
+          <div class="vm-match-body">
+            <div class="vm-why">${(v.reasons||[]).join('. ')}.</div>
+            <div class="vm-row">
+              <div class="vm-stat"><div class="vm-stat-l">Est. depreciation / yr</div><div class="vm-stat-v">${v.depr?sgd(v.depr):'–'}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Est. monthly</div><div class="vm-stat-v">${v.monthlyEst?sgd(v.monthlyEst)+'/mo':'–'}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Price range</div><div class="vm-stat-v">${v.priceMin&&v.priceMax?sgd(v.priceMin)+'–'+sgd(v.priceMax):'–'}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Ideal buyer</div><div class="vm-stat-v" style="font-size:11px;white-space:normal;line-height:1.4">${(v.ideal||'').substring(0,60)}…</div></div>
+            </div>
+            <div class="vm-pro-con">
+              <div class="vm-pros"><div class="vm-pro-title">✅ Pros</div><ul>${(v.pros||[]).map(p=>'<li>'+p+'</li>').join('')}</ul></div>
+              <div class="vm-cons"><div class="vm-con-title">⚠️ Cons</div><ul>${(v.cons||[]).map(c=>'<li>'+c+'</li>').join('')}</ul></div>
+            </div>
+            <button class="accordion-toggle" onclick="vm_toggleAcc(this)">More details <span>▼</span></button>
+            <div class="accordion-body">
+              <div class="vm-section-label" style="margin-top:.75rem">Ideal buyer</div>
+              <div class="vm-section-text">${v.ideal||''}</div>
+              <div class="vm-avoid" style="margin-top:.625rem">
+                <div class="vm-avoid-title">❌ Who should NOT buy this car</div>
+                <div class="vm-avoid-text">${v.avoid||''}</div>
+              </div>
+              <div class="vm-section-label" style="margin-top:.75rem">Potential objections</div>
+              <ul class="vm-tp-list">${(v.objections||[]).map(o=>'<li>'+o+'</li>').join('')}</ul>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+
+    } else {
+      // Local fallback
+      const scored = VM_VEHICLES.map(v => { const {score,reasons} = vm_scoreVehicle(v,profile); return {...v,score,reasons}; }).sort((a,b)=>b.score-a.score);
+      top5 = scored.slice(0,5);
+      talkingPoints = [];
+      alts = profile.specific ? vm_getAlternatives(profile.specific) : [];
+
+      el('vm-cards').innerHTML = top5.map((v,idx) => {
+        const scoreCls = v.score>=75?'':v.score>=55?'med':'low';
+        const barColor = v.score>=75?'var(--green)':v.score>=55?'var(--amb)':'var(--red)';
+        const budgetVal = parseInt(profile.budget)||Math.round((v.budgetMin+v.budgetMax)/2);
+        const monthly = vm_monthly(v,budgetVal);
+        return `<div class="vm-match-card">
+          <div class="vm-match-header">
+            <div>
+              <div class="vm-match-rank">#${idx+1} recommendation</div>
+              <div class="vm-match-name">${v.name}</div>
+              <div class="vm-score-bar-bg"><div class="vm-score-bar" style="width:${v.score}%;background:${barColor}"></div></div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div class="vm-score-badge ${scoreCls}">${v.score}%</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px">${v.type} · ${v.segment}</div>
+            </div>
+          </div>
+          <div class="vm-match-body">
+            <div class="vm-why">${v.reasons.join('. ')}.</div>
+            <div class="vm-row">
+              <div class="vm-stat"><div class="vm-stat-l">Est. depreciation / yr</div><div class="vm-stat-v">${sgd(v.depr)}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Est. monthly (30% DP, 7yr)</div><div class="vm-stat-v">${sgd(monthly)}/mo</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Price range</div><div class="vm-stat-v">${sgd(v.budgetMin)}–${sgd(v.budgetMax)}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Ideal buyer</div><div class="vm-stat-v" style="font-size:11px;white-space:normal;line-height:1.4">${v.ideal.substring(0,60)}…</div></div>
+            </div>
+            <div class="vm-pro-con">
+              <div class="vm-pros"><div class="vm-pro-title">✅ Pros</div><ul>${v.pros.map(p=>'<li>'+p+'</li>').join('')}</ul></div>
+              <div class="vm-cons"><div class="vm-con-title">⚠️ Cons</div><ul>${v.cons.map(c=>'<li>'+c+'</li>').join('')}</ul></div>
+            </div>
+            <button class="accordion-toggle" onclick="vm_toggleAcc(this)">More details <span>▼</span></button>
+            <div class="accordion-body">
+              <div class="vm-section-label" style="margin-top:.75rem">Ideal buyer</div>
+              <div class="vm-section-text">${v.ideal}</div>
+              <div class="vm-avoid" style="margin-top:.625rem"><div class="vm-avoid-title">❌ Who should NOT buy this car</div><div class="vm-avoid-text">${v.avoid}</div></div>
+              <div class="vm-section-label" style="margin-top:.75rem">Potential objections</div>
+              <ul class="vm-tp-list">${v.objections.map(o=>'<li>'+o+'</li>').join('')}</ul>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // Alternatives
+    if (profile.specific) {
+      el('vm-alt-model-name').textContent = profile.specific;
+      const altList = alts.length ? alts : vm_getAlternatives(profile.specific);
+      el('vm-alt-list').innerHTML = altList.map(a => `<div class="vm-alt-card"><div class="vm-alt-name">&#128663; ${a.name}</div><div class="vm-alt-why">${a.why}</div></div>`).join('');
+      el('vm-alt-section').style.display = '';
+    } else { el('vm-alt-section').style.display = 'none'; }
+
+    // Talking points
+    const tp = talkingPoints.length ? talkingPoints : [
+      profile.type ? `Customer prefers ${profile.type} — lead with your top-ranked ${profile.type} options.` : 'Present the top match first — don\'t offer too many options at once.',
+      profile.pref.includes('Fuel Economy') ? 'Lead with the hybrid\'s real-world fuel costs vs current petrol spend.' : 'Highlight total cost of ownership, not just sticker price.',
+      profile.pref.includes('Reliability') ? 'Have manufacturer reliability rankings and JD Power data ready.' : 'Emphasise after-sales support and warranty coverage.',
+      profile.priority === 'Lowest Monthly Payment' ? 'Have three finance scenarios ready — 5yr, 6yr, 7yr — to show live.' : 'Focus on long-term value, not just upfront price.',
+      'Build trust before price — listen for the first 10 minutes before recommending anything.'
+    ];
+    el('vm-talking-points').innerHTML = tp.slice(0,5).map(t => `<li><span>&#128172;</span>${t}</li>`).join('');
+
+    _lastVmProfile = profile;
+    _lastVmResults = top5.map(v => ({ name: v.name, score: v.score, type: v.type||'' }));
+    const sb = el('vm-save-btn'); sb.innerHTML = '&#128190; Save match'; sb.classList.remove('saved'); sb.disabled = false;
+    btn.innerHTML = '&#127775; Find best match'; btn.classList.remove('loading');
+    el('vm-results').style.display = '';
+    el('vm-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    renderVmHistory();
+  });
+}
+
+
+function vm_toggleAcc(btn) {
+  const body = btn.nextElementSibling;
+  const open = body.style.display === 'block';
+  body.style.display = open ? 'none' : 'block';
+  btn.querySelector('span').textContent = open ? '▼' : '▲';
+}
+
+function saveVmMatch() {
+  if (!_lastVmProfile || !_lastVmResults) { showToast('Run Find Best Match first'); return; }
+  const all = loadVMH();
+  all.push({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    ts: Date.now(),
+    profile: _lastVmProfile,
+    results: _lastVmResults.map(v => ({ name: v.name, score: v.score, type: v.type }))
+  });
+  saveVMH(all);
+  const sb = el('vm-save-btn');
+  sb.innerHTML = '&#10003; Saved!'; sb.classList.add('saved'); sb.disabled = true;
+  showToast('Match saved'); renderVmHistory();
+}
+
+function renderVmHistory() {
+  const q   = (el('vm-hist-search') ? el('vm-hist-search').value : '').toLowerCase();
+  const all = loadVMH();
+  const filtered = q ? all.filter(e =>
+    (e.results||[]).some(r => r.name.toLowerCase().includes(q)) ||
+    (e.profile.type||'').toLowerCase().includes(q) ||
+    (e.profile.priority||'').toLowerCase().includes(q)
+  ) : all;
+
+  const wrap = el('vm-hist-list');
+  if (!wrap) return;
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="es" style="padding:1.5rem 0"><div style="font-size:32px">&#127775;</div><p>${all.length===0?'No saved matches yet. Run a match and tap Save.':'No results match your search.'}</p></div>`;
+    return;
+  }
+  wrap.innerHTML = filtered.slice().sort((a,b)=>b.ts-a.ts).map(e => {
+    const dateStr = new Date(e.ts).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'});
+    const prof    = e.profile || {};
+    const tags    = [prof.type, prof.priority, ...(prof.pref||[])].filter(Boolean).slice(0,3);
+    const cars    = (e.results||[]).map(r=>`${r.name} (${r.score}%)`).join(' · ');
+    return `<div class="vm-hist-card">
+      <div class="vm-hist-top">
+        <div class="vm-hist-name">&#127775; Match — ${dateStr}</div>
+        <button class="vm-hist-del" onclick="deleteVmEntry('${e.id}')">&#128465; Delete</button>
+      </div>
+      <div class="vm-hist-meta">${prof.budget?`Budget: SGD ${parseInt(prof.budget).toLocaleString()}`:''} ${prof.family?`· Family: ${prof.family}`:''} ${prof.driving?`· ${prof.driving} commute`:''}</div>
+      <div class="obl-meta" style="margin-bottom:5px">${tags.map(t=>`<span class="obl-tag">${t}</span>`).join('')}</div>
+      <div class="vm-hist-cars">${cars}</div>
+    </div>`;
+  }).join('');
+}
+
+function deleteVmEntry(id) {
+  saveVMH(loadVMH().filter(e => e.id !== id));
+  showToast('Entry deleted'); renderVmHistory();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 7: OBJECTION BRAIN
+// ════════════════════════════════════════════════════════════════
+
+const OBL_KEY = 'apex_obj_library_v1';
+function loadOBL()    { try { return JSON.parse(localStorage.getItem(OBL_KEY) || '[]'); } catch(e) { return []; } }
+function saveOBL(arr) { try { localStorage.setItem(OBL_KEY, JSON.stringify(arr)); } catch(e) {} }
+
+let _lastObjAnalysis = null; // holds last analysis for saving
+
+/* ── Quick-chip selection ── */
+function ob_selectChip(btn, text) {
+  document.querySelectorAll('.ob-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  el('ob-input').value = text;
+}
+function ob_clearChip() {
+  document.querySelectorAll('.ob-chip').forEach(c => c.classList.remove('active'));
+}
+
+/* ── Objection knowledge base ── */
+const OBJ_DB = {
+  'too expensive': {
+    real: [
+      { label: 'Monthly payment is the real concern, not total price', pct: 72 },
+      { label: 'Comparing against a cheaper competitor', pct: 55 },
+      { label: 'Doesn\'t see enough value to justify the cost', pct: 48 },
+      { label: 'Budget ceiling is lower than stated', pct: 35 }
+    ],
+    psych: 'Customers rarely object to price because they genuinely cannot afford it. "Too expensive" is almost always a value gap — they haven\'t been convinced that what they get is worth what they\'re paying. It\'s a signal to sell more, not discount more.',
+    question: '"If the price wasn\'t a concern, is this the car you would choose?"',
+    donts: [
+      { x: '❌', text: 'Don\'t immediately offer a discount.', why: 'It confirms they were right to push back and signals there\'s always room to negotiate. You lose margin and credibility at the same time.' },
+      { x: '❌', text: 'Don\'t justify the price with a list of features.', why: 'Feature-dumping feels defensive. Instead, ask what they were expecting to pay and close that specific gap.' }
+    ],
+    strategy: [
+      { t: 'Isolate the real concern', d: 'Ask: "If the price wasn\'t a concern, is this the car you would choose?" If yes, the issue is price only — now you can solve it specifically.' },
+      { t: 'Reframe to monthly cost', d: 'Move from sticker price to daily/monthly cost. SGD 120,000 sounds large. SGD 49/day for a 7-year loan sounds manageable. Show the finance breakdown on the spot.' },
+      { t: 'Add value before cutting price', d: 'Offer accessories, extended warranty, or free servicing before touching the price. This keeps your margin and gives the customer something real.' }
+    ],
+    closing: 62,
+    closeNote: 'Price objections are highly handleable. With the right reframe, over 60% of customers who say "too expensive" still close — often the same day.'
+  },
+  'need to think': {
+    real: [
+      { label: 'Actively comparing with another dealership', pct: 68 },
+      { label: 'Hasn\'t got spousal or family approval', pct: 52 },
+      { label: 'Monthly commitment anxiety', pct: 44 },
+      { label: 'Doesn\'t fully trust the salesperson or dealership yet', pct: 38 }
+    ],
+    psych: '"I\'ll think about it" is the most common polite exit. Customers say this when they\'re not ready to say no but aren\'t ready to say yes either. It usually means one of three things: they\'re comparing elsewhere, they need someone else\'s approval, or they have an unspoken concern they haven\'t raised yet.',
+    question: '"Absolutely — what specifically would you like to think about? I want to make sure you have everything you need to make the right decision."',
+    donts: [
+      { x: '❌', text: 'Don\'t say "Take your time, no rush."', why: 'This sends them out the door to a competitor. Always anchor a next step before they leave.' },
+      { x: '❌', text: 'Don\'t ask "What\'s holding you back?" too bluntly.', why: 'It can feel confrontational. Instead, invite them to share what they\'re weighing up in a softer way.' }
+    ],
+    strategy: [
+      { t: 'Surface the real objection', d: 'Ask: "What specifically are you thinking about?" Listen carefully — the real concern will usually reveal itself in their answer.' },
+      { t: 'Lock in a next step before they leave', d: 'Never let a customer walk without a concrete follow-up commitment. "Can I call you tomorrow at noon to answer any questions that come up?" is much better than no plan.' },
+      { t: 'Create a soft deadline', d: 'If there\'s a legitimate urgency (limited stock, colour availability, promotion ending), mention it now. Don\'t fabricate one — but a real one is fair to share.' }
+    ],
+    closing: 45,
+    closeNote: 'Half of "I\'ll think about it" customers close within 7 days if followed up correctly. Without a structured follow-up, most are lost to competitors.'
+  },
+  "need wife's approval": {
+    real: [
+      { label: 'Spouse is the actual decision-maker in this household', pct: 78 },
+      { label: 'Customer is personally interested but cautious about commitment', pct: 55 },
+      { label: 'Financial concern — doesn\'t want to be blamed for a big spend', pct: 40 },
+      { label: 'Using spouse as a polite exit strategy', pct: 22 }
+    ],
+    psych: 'This is one of the most sincere objections in car sales. In many Singaporean families, large purchases require spousal consensus. The customer isn\'t stalling — they genuinely cannot commit without their partner. Treating this dismissively destroys trust instantly.',
+    question: '"Of course — would it be possible to bring your wife in this weekend? I\'d love to walk both of you through everything together so she can ask any questions directly."',
+    donts: [
+      { x: '❌', text: 'Don\'t say "Can\'t you just decide yourself?"', why: 'This is disrespectful and culturally tone-deaf. It will end the relationship immediately.' },
+      { x: '❌', text: 'Don\'t push for a deposit before the spouse has seen the car.', why: 'Even a small deposit creates resentment if the spouse later says no. It puts the customer in a difficult position at home.' }
+    ],
+    strategy: [
+      { t: 'Invite the spouse in — make it easy', d: 'Offer a specific weekend slot. Frame it as a family experience, not a sales appointment. "I can reserve a private viewing slot on Saturday at 11am — no pressure, just a proper look together."' },
+      { t: 'Send home the right materials', d: 'Prepare a clean one-page summary of the car, pricing, and finance options that the customer can share with their spouse. Make it easy for them to present the case at home.' },
+      { t: 'Address safety and practicality proactively', d: 'Most spouses care about safety ratings, boot space, and running costs. Include these upfront in any materials you provide — they\'re often the real decision-makers\' criteria.' }
+    ],
+    closing: 58,
+    closeNote: 'When both decision-makers come in together, close rate rises significantly. The key is making the joint visit happen — not trying to close without the spouse.'
+  },
+  'comparing other dealers': {
+    real: [
+      { label: 'Price is being benchmarked across multiple dealers', pct: 74 },
+      { label: 'Hasn\'t decided on a model yet — still in research phase', pct: 55 },
+      { label: 'Wants to feel they\'re getting the best deal before committing', pct: 65 },
+      { label: 'Trust in this dealership hasn\'t been fully established', pct: 42 }
+    ],
+    psych: 'Comparison shopping is rational behaviour. Customers who are comparing aren\'t disloyal — they\'re thorough. The goal isn\'t to stop them from comparing; it\'s to make your offer the one they come back to. Differentiate on trust, service, and value — not just price.',
+    question: '"That makes complete sense. Out of all the options you\'ve seen so far, what\'s been the closest to what you\'re looking for — and what\'s still missing?"',
+    donts: [
+      { x: '❌', text: 'Don\'t badmouth the competition.', why: 'It makes you look insecure and unprofessional. Customers often feel defensive on behalf of places they\'ve visited.' },
+      { x: '❌', text: 'Don\'t offer a blanket price match immediately.', why: 'You don\'t know what you\'re matching yet. Ask what they saw first — you may not even need to discount.' }
+    ],
+    strategy: [
+      { t: 'Find out exactly what they\'re comparing', d: 'Ask which dealers and models. Once you know the specific competitor, you can address the actual gaps — price, warranty, mileage, extras — rather than guessing.' },
+      { t: 'Differentiate on trust and after-sales', d: 'Price can always be matched. Service history, warranty quality, and the relationship with the salesperson cannot. Make these your edge explicitly.' },
+      { t: 'Offer a direct side-by-side comparison', d: 'If you know the competitor\'s offer, walk them through a written comparison on the spot. Transparency builds enormous trust and often closes the deal right there.' }
+    ],
+    closing: 48,
+    closeNote: 'Comparison objections resolve when customers feel they\'ve done their due diligence. Help them complete that process with you — don\'t fight it.'
+  },
+  'monthly instalment too high': {
+    real: [
+      { label: 'Total cash flow is already stretched by other commitments', pct: 70 },
+      { label: 'Budget ceiling is lower than they initially stated', pct: 58 },
+      { label: 'Hasn\'t considered longer tenure or higher downpayment options', pct: 50 },
+      { label: 'Wants to feel they negotiated a better deal', pct: 32 }
+    ],
+    psych: 'Monthly instalment objections are the most solvable in car sales because there are multiple levers — downpayment, tenure, rate, and total price. Customers often haven\'t been shown the full range of options. This objection is an invitation to restructure, not an impasse.',
+    question: '"What monthly number would you feel completely comfortable committing to — not just acceptable, but genuinely comfortable?"',
+    donts: [
+      { x: '❌', text: 'Don\'t immediately cut the price to lower the instalment.', why: 'There are better ways — extending tenure, increasing downpayment, or structuring a balloon payment. Try these first to protect your margin.' },
+      { x: '❌', text: 'Don\'t assume they can\'t afford it.', why: 'Often the gap is small — SGD 50–100/month. Show them the exact number before concluding there\'s no solution.' }
+    ],
+    strategy: [
+      { t: 'Get the exact comfortable number first', d: 'Ask "What monthly amount would feel right for you?" Lock in their number, then work backwards from it through tenure and downpayment adjustments.' },
+      { t: 'Show three finance scenarios side by side', d: 'Use the Finance Calculator to show 5, 6, and 7 year options with different downpayments. Seeing the actual numbers often resolves the concern on the spot.' },
+      { t: 'Explore downpayment flexibility', d: 'A higher downpayment directly reduces the monthly commitment. Ask if they have flexibility on the upfront amount — trade-in value can often cover this gap.' }
+    ],
+    closing: 67,
+    closeNote: 'Finance restructuring objections have the highest close rate when handled with a transparent calculator approach. Showing numbers live is far more effective than verbal reassurance.'
+  },
+  'trade-in too low': {
+    real: [
+      { label: 'Customer has an inflated perception of their car\'s market value', pct: 68 },
+      { label: 'Emotional attachment to their current car is affecting judgement', pct: 52 },
+      { label: 'Gap between expected and offered trade-in changes the total deal economics', pct: 60 },
+      { label: 'Has been quoted higher by another dealer as a negotiation tactic', pct: 44 }
+    ],
+    psych: 'People almost universally overvalue their own car. This is normal — it\'s theirs, they know its history, and it has emotional meaning. The trade-in objection is rarely about the car; it\'s about feeling respected and not feeling taken advantage of.',
+    question: '"I understand — can I ask, where did you get the SGD [X] figure from? I want to make sure we\'re comparing apples to apples before we go further."',
+    donts: [
+      { x: '❌', text: 'Don\'t argue about the car\'s condition or mileage bluntly.', why: 'Criticising their car feels personal. Instead, walk through the valuation methodology neutrally and transparently.' },
+      { x: '❌', text: 'Don\'t immediately budge on the trade-in without understanding the source of their expectation.', why: 'If they\'ve been given an inflated quote by a competitor as a tactic, you need to address that specifically, not just match a number.' }
+    ],
+    strategy: [
+      { t: 'Show your valuation methodology transparently', d: 'Walk through the market comparison, mileage deduction, and refurbishment estimate openly. Transparency reduces the feeling of being cheated.' },
+      { t: 'Reframe the total deal economics', d: 'If you can\'t move on trade-in, consider adjusting the car price, throwing in accessories, or extending warranty. The customer cares about the total outcome — not just one line item.' },
+      { t: 'Offer to get a second opinion together', d: 'If they\'ve been quoted higher elsewhere, offer to go through it together. Often the competing quote has conditions attached that change the real number.' }
+    ],
+    closing: 52,
+    closeNote: 'Trade-in objections often resolve when customers feel the valuation process was fair and transparent. The close rate improves significantly when you show your working.'
+  },
+  'loan rejected': {
+    real: [
+      { label: 'Existing financial commitments are reducing loan eligibility', pct: 72 },
+      { label: 'Credit score issue from a past event the customer may not be aware of', pct: 58 },
+      { label: 'Loan amount applied for was too high relative to income', pct: 50 },
+      { label: 'Customer applied to the wrong finance company for their profile', pct: 38 }
+    ],
+    psych: 'Loan rejection is emotionally difficult for customers — it can feel embarrassing. They may shut down or become defensive. The salesperson who handles this with empathy and practical solutions rather than frustration will earn enormous loyalty and often still close the deal.',
+    question: '"Thank you for letting me know — let\'s figure this out together. Do you know which aspect of the application caused the issue? That will help me point you in the right direction."',
+    donts: [
+      { x: '❌', text: 'Don\'t react with visible disappointment or frustration.', why: 'The customer is already embarrassed. Any negative reaction from you will cause them to disengage permanently.' },
+      { x: '❌', text: 'Don\'t immediately suggest a cheaper car as the solution.', why: 'This feels like a downgrade and can be insulting. Explore restructuring the loan first before suggesting a different vehicle.' }
+    ],
+    strategy: [
+      { t: 'Explore alternative finance companies', d: 'Different finance companies have different risk appetites and credit models. A rejection from one doesn\'t mean rejection from all. Work with your finance manager to identify the right match for this customer.' },
+      { t: 'Restructure the loan parameters', d: 'A higher downpayment, shorter tenure, or co-borrower can change the loan profile significantly. Walk through each option calmly and practically.' },
+      { t: 'Help them understand their position', d: 'If the issue is a credit score problem, point them toward credit repair resources. A 3–6 month wait with the right steps can make the next application successful. Stay in touch — this customer will come back.' }
+    ],
+    closing: 35,
+    closeNote: 'Loan rejections are difficult but not deal-ending in most cases. With the right finance restructuring, approximately 35% of initial rejections can still result in a closed deal — often with a different product configuration.'
+  },
+  'wants better warranty': {
+    real: [
+      { label: 'Has had a bad experience with car repairs or unexpected costs before', pct: 65 },
+      { label: 'Comparing against a competitor offering a longer warranty', pct: 60 },
+      { label: 'Doesn\'t fully trust the brand or model\'s long-term reliability', pct: 45 },
+      { label: 'Warranty is being used as a negotiation chip for price reduction', pct: 35 }
+    ],
+    psych: 'Warranty concerns are almost never just about the warranty — they\'re about fear of unexpected future costs. Customers want certainty. The more you can make them feel protected after the sale, the lower their resistance becomes. Warranty is an easy win if you have it to offer.',
+    question: '"What specifically about the warranty isn\'t sitting right with you — is it the duration, the coverage, or something that happened with a previous car?"',
+    donts: [
+      { x: '❌', text: 'Don\'t dismiss the warranty concern as minor.', why: 'For customers focused on post-purchase risk, warranty is the biggest part of the decision. Take it seriously.' },
+      { x: '❌', text: 'Don\'t just read out the warranty terms robotically.', why: 'Customers need to feel protected, not informed. Translate the terms into real-world scenarios: "If your engine has a problem in year 2, this is exactly what happens..."' }
+    ],
+    strategy: [
+      { t: 'Explore what\'s driving the concern', d: 'Ask if they\'ve had a bad experience before, or if they\'ve seen a better warranty elsewhere. The answer changes your response entirely.' },
+      { t: 'Offer an extended warranty package', d: 'If you can add an extended warranty — even at cost — do it. A 5-year warranty vs a 3-year warranty often closes deals that price discounts cannot.' },
+      { t: 'Walk through the warranty in plain language', d: 'Explain exactly what\'s covered, what the claims process looks like, and what isn\'t covered. Transparency here builds more trust than any feature list.' }
+    ],
+    closing: 60,
+    closeNote: 'Warranty objections are among the most solvable. When handled with empathy and a concrete offer, close rate after this objection is above 60%.'
+  },
+  'found cheaper elsewhere': {
+    real: [
+      { label: 'Has seen a genuine lower price and is using it as leverage', pct: 70 },
+      { label: 'Competitor quote has conditions or exclusions not mentioned yet', pct: 55 },
+      { label: 'Prefers your dealership but needs justification for the price difference', pct: 48 },
+      { label: 'Testing how much flexibility you have before committing', pct: 40 }
+    ],
+    psych: 'When a customer says they found it cheaper elsewhere, they\'re often telling you they want to buy from you — but they need you to either match the price or justify the gap convincingly. This is one of the most actionable objections because the customer has already decided on the product.',
+    question: '"Can I ask — what exactly was the price they quoted, and did it include the same specs, warranty, and package that we\'re offering here?"',
+    donts: [
+      { x: '❌', text: 'Don\'t immediately match the price without knowing the details.', why: 'You might be comparing different specs, warranties, or included extras. Get the full picture first — the gap may not be real once everything is accounted for.' },
+      { x: '❌', text: 'Don\'t question the customer\'s honesty.', why: 'Even if the quote seems suspicious, treat it as genuine and respond with facts. Calling it out will destroy trust immediately.' }
+    ],
+    strategy: [
+      { t: 'Get the exact details of the competitor quote', d: 'Ask for the model, year, mileage, warranty, and any inclusions. A lower price often comes with fewer inclusions, shorter warranty, or higher mileage. Make the real comparison visible.' },
+      { t: 'Justify your price with specifics', d: 'If your price is genuinely higher, explain exactly why: better warranty, lower mileage, service history, extras included. Make the value concrete and comparable.' },
+      { t: 'Offer a matching package rather than a straight discount', d: 'Add accessories, servicing, or warranty rather than reducing the sticker price. This protects your margin while giving the customer something tangible.' }
+    ],
+    closing: 65,
+    closeNote: 'Customers who have found cheaper elsewhere but are still talking to you are highly motivated to buy from you. The close rate is high when you respond with transparency rather than panic.'
+  },
+  'not ready yet': {
+    real: [
+      { label: 'Current car still has usable COE — timeline is genuinely not urgent', pct: 60 },
+      { label: 'Waiting for a financial event: bonus, pay rise, or end of existing loan', pct: 55 },
+      { label: 'In early research phase — hasn\'t decided on a model yet', pct: 45 },
+      { label: 'Personal life event (renovation, wedding, new baby) is taking priority', pct: 38 }
+    ],
+    psych: '"Not ready yet" is the softest objection — it doesn\'t mean no, it means not now. The risk here is losing the customer to a competitor during the waiting period, or having them forget you entirely. Your job is to stay memorable and relevant until they\'re ready.',
+    question: '"That\'s completely fine — can I ask what your timeline looks like? Knowing when you\'re likely to decide will help me make sure we have the right stock and the best options ready for you."',
+    donts: [
+      { x: '❌', text: 'Don\'t push for urgency when there genuinely isn\'t any.', why: 'Creating false pressure on a customer who isn\'t ready will make you memorable for the wrong reason. They\'ll avoid you when they are ready.' },
+      { x: '❌', text: 'Don\'t disappear and wait for them to call you.', why: 'Customers who say "not ready yet" almost never come back on their own. You need a structured, low-pressure nurture plan to stay top of mind.' }
+    ],
+    strategy: [
+      { t: 'Establish a timeline and agree on a check-in date', d: 'Ask when they\'re likely to be in the market and lock in a specific follow-up: "Can I check back in with you in 6 weeks?" Customers who commit to a check-in date are far more likely to engage when you call.' },
+      { t: 'Stay in touch with value, not pressure', d: 'Send them relevant updates: new stock arrivals, promotions that match their profile, or a quick market insight. Every touchpoint should add value, not create urgency.' },
+      { t: 'Leave a strong impression so they come back to you first', d: 'Make sure they have your contact, remember your name, and associate you with a great experience. When they\'re ready, the first person they contact is the one who treated them best — even months ago.' }
+    ],
+    closing: 30,
+    closeNote: 'Low immediate close rate, but this is a long-game opportunity. Customers who are genuinely not ready but have been nurtured well have very high close rates (70%+) when they enter the market — and they often come directly to the salesperson they liked most.'
+  },
+  'other': {
+    real: [
+      { label: 'The stated objection may not be the real one — deeper concern exists', pct: 65 },
+      { label: 'Customer is not yet comfortable enough to share the real reason', pct: 55 },
+      { label: 'Multiple concerns are overlapping and haven\'t been separated yet', pct: 48 },
+      { label: 'Customer is using a vague objection to buy thinking time', pct: 40 }
+    ],
+    psych: 'When a customer gives a vague or unusual objection, it\'s usually because the real concern hasn\'t surfaced yet. The priority is to create a safe space for them to share honestly, without feeling judged or pressured. Listen more than you speak in this situation.',
+    question: '"I appreciate you sharing that — can I ask, if everything else was perfect, what would be the one thing that would still hold you back?"',
+    donts: [
+      { x: '❌', text: 'Don\'t try to overcome the objection before fully understanding it.', why: 'Responding to a vague objection with a solution often misses the mark and makes the customer feel unheard.' },
+      { x: '❌', text: 'Don\'t fill silence with features or promotions.', why: 'When a customer pauses or is vague, silence and patience often bring out the real concern. Jumping in too quickly shuts that down.' }
+    ],
+    strategy: [
+      { t: 'Ask open questions and listen deeply', d: 'Use open questions: "What would make this feel like the right decision for you?" or "What would need to be different?" Don\'t guide the answer — let them talk.' },
+      { t: 'Identify whether it\'s one concern or multiple', d: 'Sometimes customers have several concerns stacked on top of each other. Try to separate them: "It sounds like there are a couple of things — can we go through them one at a time?"' },
+      { t: 'Be patient and make them feel heard first', d: 'The fastest path to closing is making the customer feel completely understood before offering any solution. Summarise what they\'ve shared back to them before responding.' }
+    ],
+    closing: 45,
+    closeNote: 'Unspecified objections require patience and good questioning. When the real concern is surfaced and addressed, close rate improves substantially — typically to 50–70% depending on what the real issue turns out to be.'
+  }
+};
+
+/* ── Normalize objection input to DB key ── */
+function ob_normalize(text) {
+  const t = text.toLowerCase().trim();
+  if (t.includes('expens') || t.includes('too high price') || t.includes('too pricey')) return 'too expensive';
+  if (t.includes('think') || t.includes('consider') || t.includes('come back')) return 'need to think';
+  if (t.includes('wife') || t.includes('husband') || t.includes('spouse') || t.includes('partner') || t.includes('approval')) return "need wife's approval";
+  if (t.includes('compar') || t.includes('other dealer') || t.includes('other showroom') || t.includes('shopping around')) return 'comparing other dealers';
+  if (t.includes('instalment') || t.includes('monthly') || t.includes('payment too high')) return 'monthly instalment too high';
+  if (t.includes('trade') || t.includes('trade-in') || t.includes('valuation')) return 'trade-in too low';
+  if (t.includes('loan') || t.includes('reject') || t.includes('credit') || t.includes('bank reject')) return 'loan rejected';
+  if (t.includes('warrant')) return 'wants better warranty';
+  if (t.includes('cheaper') || t.includes('cheaper elsewhere') || t.includes('found it cheaper')) return 'found cheaper elsewhere';
+  if (t.includes('not ready') || t.includes('not the right time') || t.includes('maybe later') || t.includes('few months')) return 'not ready yet';
+  return 'other';
+}
+
+/* ── Main analysis function ── */
+function analyzeObjection() {
+  const raw = gv('ob-input');
+  if (!raw) { showToast('Please enter or select an objection first'); return; }
+  const btn = el('ob-btn');
+  btn.innerHTML = '<div class="spinner"></div> Analyzing...'; btn.classList.add('loading');
+
+  apexAI('objection', { objection: raw }).then(gpt => {
+    function applyLocal() {
+      const key  = ob_normalize(raw);
+      const data = OBJ_DB[key] || OBJ_DB['other'];
+      el('ob-real-list').innerHTML = data.real.map(r => `<div class="ob-reason-row"><div class="ob-reason-label">${r.label}</div><div class="ob-bar-wrap"><div class="ob-bar-bg"><div class="ob-bar-fill" style="width:${r.pct}%"></div></div></div><div class="ob-pct">${r.pct}%</div></div>`).join('');
+      el('ob-psych-text').textContent = data.psych;
+      el('ob-question').textContent   = data.question;
+      el('ob-donts').innerHTML = `<div class="ob-dont-title">❌ What NOT to say or do</div>` + data.donts.map(d => `<div class="ob-dont-item"><div class="ob-dont-x">${d.x}</div><div><div class="ob-dont-text">${d.text}</div><div class="ob-dont-text" style="opacity:.75;margin-top:3px;font-size:12px">Why: ${d.why}</div></div></div>`).join('');
+      el('ob-strategy').innerHTML = data.strategy.map((s,i) => `<div class="sc" style="background:transparent;padding:0;margin-bottom:${i<data.strategy.length-1?'10px':'0'};border:none"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`).join('');
+      const pct = data.closing, barColor = pct>=60?'var(--green)':pct>=40?'var(--amb)':'var(--red)';
+      el('ob-close-pct').textContent = pct+'%'; el('ob-close-pct').style.color = barColor;
+      el('ob-close-bar').style.width = pct+'%'; el('ob-close-bar').style.background = barColor;
+      el('ob-close-note').textContent = data.closeNote;
+      return { objection: raw, key, data, ts: Date.now() };
+    }
+
+    let analysis;
+    if (gpt) {
+      // Render from GPT
+      el('ob-real-list').innerHTML = (gpt.real||[]).map(r => `<div class="ob-reason-row"><div class="ob-reason-label">${r.label}</div><div class="ob-bar-wrap"><div class="ob-bar-bg"><div class="ob-bar-fill" style="width:${r.pct}%"></div></div></div><div class="ob-pct">${r.pct}%</div></div>`).join('');
+      el('ob-psych-text').textContent = gpt.psych || '';
+      el('ob-question').textContent   = gpt.question || '';
+      el('ob-donts').innerHTML = `<div class="ob-dont-title">❌ What NOT to say or do</div>` + (gpt.donts||[]).map(d => `<div class="ob-dont-item"><div class="ob-dont-x">${d.x||'❌'}</div><div><div class="ob-dont-text">${d.text}</div><div class="ob-dont-text" style="opacity:.75;margin-top:3px;font-size:12px">Why: ${d.why}</div></div></div>`).join('');
+      el('ob-strategy').innerHTML = (gpt.strategy||[]).map((s,i) => `<div class="sc" style="background:transparent;padding:0;margin-bottom:${i<(gpt.strategy.length-1)?'10px':'0'};border:none"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`).join('');
+      const pct = gpt.closing||50, barColor = pct>=60?'var(--green)':pct>=40?'var(--amb)':'var(--red)';
+      el('ob-close-pct').textContent = pct+'%'; el('ob-close-pct').style.color = barColor;
+      el('ob-close-bar').style.width = pct+'%'; el('ob-close-bar').style.background = barColor;
+      el('ob-close-note').textContent = gpt.closeNote || '';
+      analysis = { objection: raw, key: ob_normalize(raw), data: { ...gpt, closing: pct }, ts: Date.now() };
+    } else {
+      analysis = applyLocal();
+    }
+
+    _lastObjAnalysis = analysis;
+    const sb = el('ob-save-btn'); sb.innerHTML = '&#128190; Save to Objection Library'; sb.classList.remove('saved'); sb.disabled = false;
+    btn.innerHTML = '&#129504; Analyze objection'; btn.classList.remove('loading');
+    el('ob-results').style.display = '';
+    el('ob-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    renderObjLibrary();
+  });
+}
+
+
+function saveToObjLibrary() {
+  if (!_lastObjAnalysis) { showToast('Analyze an objection first'); return; }
+
+  const lib = loadOBL();
+  const existing = lib.find(e => e.key === _lastObjAnalysis.key);
+  if (existing) {
+    // Update existing entry
+    existing.count     = (existing.count || 1) + 1;
+    existing.lastUsed  = Date.now();
+    existing.closingPcts.push(_lastObjAnalysis.data.closing);
+    existing.avgClosing = Math.round(existing.closingPcts.reduce((a,b)=>a+b,0) / existing.closingPcts.length);
+    saveOBL(lib);
+  } else {
+    lib.push({
+      id: Date.now().toString(36),
+      objection: _lastObjAnalysis.objection,
+      key: _lastObjAnalysis.key,
+      count: 1,
+      firstSaved: Date.now(),
+      lastUsed: Date.now(),
+      closingPcts: [_lastObjAnalysis.data.closing],
+      avgClosing: _lastObjAnalysis.data.closing,
+      strategy: _lastObjAnalysis.data.strategy
+    });
+    saveOBL(lib);
+  }
+
+  const sb = el('ob-save-btn');
+  sb.innerHTML = '&#10003; Saved to Library!'; sb.classList.add('saved'); sb.disabled = true;
+  showToast('Saved to Objection Library');
+  renderObjLibrary();
+}
+
+/* ── Render Objection Library ── */
+function renderObjLibrary() {
+  const q   = (el('obl-search').value || '').toLowerCase();
+  const lib = loadOBL();
+  const filtered = q ? lib.filter(e => e.objection.toLowerCase().includes(q) || e.key.includes(q)) : lib;
+
+  const wrap = el('obl-list');
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="es" style="padding:1.5rem 0"><div style="font-size:32px">&#128214;</div><p>${lib.length === 0 ? 'No saved objections yet. Analyze one and tap Save.' : 'No results match your search.'}</p></div>`;
+    return;
+  }
+
+  wrap.innerHTML = filtered.slice().sort((a,b) => b.lastUsed - a.lastUsed).map(e => {
+    const lastDate = new Date(e.lastUsed).toLocaleDateString('en-SG', { day:'numeric', month:'short', year:'numeric' });
+    const barColor = e.avgClosing >= 60 ? 'var(--green)' : e.avgClosing >= 40 ? 'var(--amb)' : 'var(--red)';
+    return `<div class="obl-card">
+      <div class="obl-top">
+        <div class="obl-obj">${e.objection}</div>
+        <button class="obl-del" onclick="deleteObjEntry('${e.id}')">&#128465; Delete</button>
+      </div>
+      <div class="obl-meta">
+        <span class="obl-tag">&#128260; ${e.count} time${e.count!==1?'s':''}</span>
+        <span class="obl-tag">&#128197; ${lastDate}</span>
+        <span class="obl-tag" style="color:${barColor}">&#127919; Avg close: ${e.avgClosing}%</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function deleteObjEntry(id) {
+  const lib = loadOBL().filter(e => e.id !== id);
+  saveOBL(lib);
+  showToast('Entry deleted');
+  renderObjLibrary();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 8b: LIVE SALES COPILOT ENGINE
+// ════════════════════════════════════════════════════════════════
+
+const CP_KEY = 'apex_copilot_v1';
+function cp_loadHistory()    { try { return JSON.parse(localStorage.getItem(CP_KEY) || '[]'); } catch(e) { return []; } }
+function cp_saveHistory(arr) { try { localStorage.setItem(CP_KEY, JSON.stringify(arr)); } catch(e) {} }
+
+// ── Runtime state ──
+let _cp = {
+  active: false,
+  startTime: null,
+  timerInterval: null,
+  notes: '',
+  allNotes: [],        // accumulated per update
+  timeline: [],        // { time, text, type }
+  updates: 0,
+  lastAnalysis: null
+};
+
+function cp_fmt(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return String(m).padStart(2,'0') + ':' + String(s % 60).padStart(2,'0');
+}
+
+function cp_now() {
+  if (!_cp.startTime) return '00:00';
+  return cp_fmt(Date.now() - _cp.startTime);
+}
+
+function cp_timeStr() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+function cp_startDeal() {
+  _cp = { active:true, startTime:Date.now(), timerInterval:null, notes:'', allNotes:[], timeline:[], updates:0, lastAnalysis:null };
+  _cp.timeline.push({ time: cp_timeStr(), elapsed: '00:00', text: 'Deal started', type: 'start' });
+  // Update live title with today's customer number
+  const todayNum = sessionGetCount() + 1;
+  const titleEl = el('cp-live-title');
+  if (titleEl) titleEl.textContent = '\u{1F534} Customer #' + todayNum + ' Today';
+
+  // Show live screen, hide start screen
+  el('cp-start').style.display  = 'none';
+  el('cp-live').style.display   = 'flex';
+  el('cp-notes').value = '';
+  el('cp-coaching').style.display     = 'none';
+  el('cp-intent-bar').style.display   = 'none';
+  el('cp-emotion-wrap').style.display = 'none';
+  el('cp-outcome-sheet').style.display  = 'none';
+  el('cp-timeline').style.display       = 'none';
+  el('cp-question-card').style.display  = 'none';
+  el('cp-stage-wrap').style.display     = 'none';
+
+  // Reset stat cards
+  ['cp-mood-val','cp-intent-val','cp-trust-val','cp-risk-val'].forEach(id => el(id).textContent = '–');
+  el('cp-mood-icon').textContent = '😐';
+  el('cp-intent-pct').textContent = '0%';
+  el('cp-intent-fill').style.width = '0%';
+
+  // Start timer
+  _cp.timerInterval = setInterval(() => {
+    if (el('cp-timer')) el('cp-timer').textContent = cp_now();
+  }, 1000);
+}
+
+// ── Core analysis engine ──
+function cp_analyse(fullNotes) {
+  const n = fullNotes.toLowerCase();
+
+  // ─ Intent scoring ─
+  let intent = 40;
+  const positiveSignals  = ['like','love','interested','good','yes','agree','okay','ok','confirm','book','test drive','take it','deal','sign'];
+  const negativeSignals  = ['no','not sure','think','expensive','high','wife','spouse','compare','later','maybe','reject','denied'];
+  const urgentSignals    = ['today','now','this week','asap','urgent','ready','confirm','deposit'];
+  positiveSignals.forEach(w => { if (n.includes(w)) intent += 7; });
+  negativeSignals.forEach(w => { if (n.includes(w)) intent -= 5; });
+  urgentSignals.forEach(w   => { if (n.includes(w)) intent += 10; });
+  intent = Math.max(5, Math.min(95, intent));
+
+  // ─ Mood ─
+  let mood, moodIcon;
+  if (intent >= 70)      { mood = 'Positive';  moodIcon = '😊'; }
+  else if (intent >= 45) { mood = 'Neutral';   moodIcon = '😐'; }
+  else                   { mood = 'Concerned'; moodIcon = '😟'; }
+  if (n.includes('angry') || n.includes('upset') || n.includes('frustrated')) { mood = 'Frustrated'; moodIcon = '😤'; }
+  if (n.includes('excited') || n.includes('love it') || n.includes('perfect')) { mood = 'Excited'; moodIcon = '🤩'; }
+
+  // ─ Trust ─
+  let trust = 'Medium';
+  if (n.includes('trust') || n.includes('recommend') || n.includes('friend') || n.includes('came back') || intent >= 70) trust = 'High';
+  if (n.includes('worried') || n.includes('scam') || n.includes('not sure about') || n.includes('other dealer') || intent <= 30) trust = 'Low';
+
+  // ─ Risk ─
+  let risk = 'Medium';
+  const highRiskWords  = ['loan rejected','wife','spouse','expensive','compare','thinking','not ready','cancel','walk out'];
+  const lowRiskWords   = ['test drive','book','deposit','confirm','today','sign'];
+  highRiskWords.forEach(w => { if (n.includes(w)) risk = 'High'; });
+  lowRiskWords.forEach(w  => { if (n.includes(w) && risk !== 'High') risk = 'Low'; });
+
+  // ─ Emotions (multi) ─
+  const emotions = [];
+  if (n.includes('excit') || n.includes('love') || n.includes('perfect'))           emotions.push({ label:'Excited',       color:'var(--green)',   bg:'var(--gbg)' });
+  if (n.includes('confus') || n.includes('not sure') || n.includes('don\'t understand')) emotions.push({ label:'Confused',      color:'var(--amb)',     bg:'var(--abg)' });
+  if (n.includes('expensive') || n.includes('high') || n.includes('monthly') || n.includes('budget')) emotions.push({ label:'Price Sensitive', color:'var(--red)',    bg:'var(--rbg)' });
+  if (n.includes('trust') || n.includes('honest') || n.includes('transparent'))     emotions.push({ label:'Trust Building', color:'var(--blue)',   bg:'var(--bbg)' });
+  if (n.includes('compar') || n.includes('other dealer') || n.includes('shopping')) emotions.push({ label:'Comparing',      color:'var(--amb)',     bg:'var(--abg)' });
+  if (n.includes('today') || n.includes('asap') || n.includes('urgent') || n.includes('now')) emotions.push({ label:'Urgent',         color:'var(--green)',   bg:'var(--gbg)' });
+  if (n.includes('browse') || n.includes('just looking') || n.includes('early stage') || n.includes('not decided')) emotions.push({ label:'Just Browsing',  color:'var(--muted)', bg:'var(--s2)'  });
+  if (emotions.length === 0) emotions.push({ label:'Neutral', color:'var(--muted)', bg:'var(--s2)' });
+
+  // ─ Say this next ─
+  let say = 'Tell me more — what would make this the right car for you today?';
+  if (n.includes('monthly') || n.includes('instalment') || n.includes('payment')) say = '"Let me show you three finance options side by side — it takes 60 seconds and changes how the numbers feel."';
+  else if (n.includes('wife') || n.includes('spouse') || n.includes('husband'))   say = '"Would it help if both of you came in together? I\'ll keep the slot open just for you."';
+  else if (n.includes('compar') || n.includes('other dealer'))                    say = '"What\'s the one thing the other place had that we haven\'t shown you yet?"';
+  else if (n.includes('trade') || n.includes('trade-in'))                         say = '"Let me get your trade-in valued right now — it usually takes about 5 minutes and changes the total picture."';
+  else if (n.includes('warranty'))                                                 say = '"Our warranty covers [X] years bumper to bumper — let me walk you through exactly what happens if something goes wrong."';
+  else if (n.includes('test drive') || n.includes('drive'))                        say = '"The quickest way to know if this is the right car is to drive it. Shall I get the keys?"';
+  else if (intent >= 70)                                                            say = '"It sounds like this is the one. What would it take to make it yours today?"';
+  else if (intent <= 30)                                                            say = '"I hear you — let\'s step back. What would the perfect car look like for you, starting from scratch?"';
+
+  // ─ Warn ─
+  let warn = "Don't fill silence with features — let them talk first.";
+  if (n.includes('monthly') || n.includes('expensive'))  warn = "Don't cut the price first — restructure tenure or downpayment instead.";
+  else if (n.includes('compar') || n.includes('other dealer'))   warn = "Don't criticise competitors — it makes you look insecure.";
+  else if (n.includes('wife') || n.includes('spouse'))           warn = "Don't push for a solo decision — the deal needs both parties.";
+  else if (n.includes('think') || n.includes('not sure'))        warn = "Don't say 'take your time' — always lock in a specific next step before they leave.";
+  else if (n.includes('loan') || n.includes('reject'))           warn = "Don't react with disappointment — stay calm and move to alternative finance options immediately.";
+  else if (intent >= 75)                                          warn = "Don't over-explain now — they're close. Silence and a clear next step closes faster than more talking.";
+
+  // ─ Next action ─
+  let action = 'Listen actively — do not pitch for the next 2 minutes.';
+  if (n.includes('test drive') || intent >= 65)                  action = 'Book the test drive now — hand them the keys while momentum is high.';
+  else if (n.includes('monthly') || n.includes('instalment'))    action = 'Pull up the Finance Calculator and show three scenarios on screen.';
+  else if (n.includes('wife') || n.includes('spouse'))           action = 'Suggest a joint visit — offer a specific weekend time slot.';
+  else if (n.includes('trade') || n.includes('trade-in'))        action = 'Get the trade-in valuation done right now — it changes the total deal feel.';
+  else if (n.includes('compar') || n.includes('other'))          action = 'Open the Compare Offers tab and build a side-by-side comparison together.';
+  else if (n.includes('loan') || n.includes('reject'))           action = 'Speak with the finance manager immediately about alternative loan structures.';
+  else if (n.includes('warranty'))                               action = 'Print or show the warranty terms document — make it tangible.';
+  else if (trust === 'Low')                                      action = 'Slow down. Ask about their previous car-buying experience and listen.';
+  else if (intent >= 75)                                         action = 'Move to paperwork — ask if they\'d like to reserve the unit with a refundable deposit.';
+
+  // ─ Stage (Constitution: know where you are in the conversation) ─
+  let stage = 'Discovery';
+  if (n.includes('sign') || n.includes('deposit') || n.includes('confirm') || n.includes('paperwork')) stage = 'Closing';
+  else if (n.includes('test drive') && intent >= 60) stage = 'Closing';
+  else if (n.includes('too expensive') || n.includes('too high') || n.includes('think') || n.includes('wife') || n.includes('loan reject')) stage = 'Objection';
+  else if (n.includes('compar') || n.includes('other dealer') || n.includes('other showroom')) stage = 'Comparing';
+  else if (n.includes('trust') || n.includes('recommend') || n.includes('honest') || n.includes('transparent')) stage = 'Trust Building';
+  else if (intent >= 60) stage = 'Trust Building';
+
+  // ─ Best question (Constitution principle 3 & 7) ─
+  let bestQuestion = 'What would need to be true for you to feel completely comfortable making a decision today?';
+  let whyQuestion  = 'This question surfaces the real barrier without confronting the customer directly — it gives them permission to be honest.';
+
+  if (stage === 'Discovery') {
+    bestQuestion = 'What is the one thing you are looking for in your next car that your current car does not give you?';
+    whyQuestion  = 'Understanding the gap between what they have and what they want reveals the real motivation — not just the stated preference.';
+  } else if (stage === 'Trust Building') {
+    bestQuestion = 'What would make you feel completely confident that you are making the right decision here?';
+    whyQuestion  = 'This question shifts the conversation from the car to the relationship — and trust is what closes deals at this stage.';
+  } else if (stage === 'Comparing') {
+    bestQuestion = 'Out of everything you have seen so far, what has been closest to what you are looking for — and what was still missing?';
+    whyQuestion  = 'This question positions you as a consultant, not a salesperson, and reveals exactly what gap you need to fill.';
+  } else if (stage === 'Objection') {
+    if (n.includes('monthly') || n.includes('expensive') || n.includes('high')) {
+      bestQuestion = 'If the monthly number was not a concern, is this the car you would choose?';
+      whyQuestion  = 'This isolates whether the objection is really about price or about something else — and the answer tells you exactly where to go next.';
+    } else if (n.includes('wife') || n.includes('spouse')) {
+      bestQuestion = 'What would your wife or partner need to see or hear to feel comfortable with this decision?';
+      whyQuestion  = 'This respects the decision-making dynamic and gives you a concrete roadmap to closing — bring the right partner in.';
+    } else {
+      bestQuestion = 'What specifically would need to change for this to feel like the right car at the right time?';
+      whyQuestion  = 'A specific question about change reveals the real objection without putting the customer on the defensive.';
+    }
+  } else if (stage === 'Closing') {
+    bestQuestion = 'Is there anything at all that would stop you from moving forward today?';
+    whyQuestion  = 'At the closing stage, one clean question to clear final obstacles is more effective than any amount of pitching.';
+  }
+
+  return { mood, moodIcon, trust, risk, intent, emotions, say, warn, action, stage, bestQuestion, whyQuestion };
+}
+
+function cp_update() {
+  var notes = el('cp-notes').value.trim();
+  if (!notes) { showToast('Type some notes first'); return; }
+
+  var btn = el('cp-update-btn');
+  btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+  btn.classList.add('loading');
+
+  // Accumulate notes
+  _cp.allNotes.push(notes);
+  _cp.updates++;
+  var elapsed = cp_now(), timeStr = cp_timeStr();
+  var n = notes.toLowerCase();
+  var tlText = 'Update #' + _cp.updates;
+  if      (n.includes('test drive'))                        tlText = 'Test drive discussed';
+  else if (n.includes('monthly') || n.includes('instal'))   tlText = 'Finance discussed';
+  else if (n.includes('warranty'))                          tlText = 'Warranty discussed';
+  else if (n.includes('wife') || n.includes('spouse'))      tlText = 'Spouse mentioned';
+  else if (n.includes('trade'))                             tlText = 'Trade-in discussed';
+  else if (n.includes('compar'))                            tlText = 'Competitor comparison raised';
+  else if (n.includes('expens') || n.includes('too high'))  tlText = 'Objection raised';
+  else if (n.includes('agree') || n.includes('yes'))        tlText = 'Positive signal';
+  _cp.timeline.push({ time: timeStr, elapsed: elapsed, text: tlText, type: 'update' });
+
+  var fullNotes = _cp.allNotes.join(' ');
+  var prevNotes = _cp.allNotes.slice(0, -1).join(' ');
+
+  // Remove any previous notice
+  var existing = document.querySelector('#cp-live .apex-api-notice');
+  if (existing) existing.remove();
+
+  // ── Call the secure backend ──
+  fetch('/api/apex-ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      module: 'live_copilot',
+      input: { notes: fullNotes, liveNotes: notes },
+      context: {
+        previousNotes: prevNotes,
+        dealContext: _cp.allNotes.length > 1
+          ? ('Ongoing deal — ' + _cp.updates + ' updates so far')
+          : 'First update in this deal'
+      }
+    })
+  })
+  .then(function(resp) {
+    // Always parse the JSON body — even error responses have useful info
+    return resp.json().then(function(data) {
+      return { httpStatus: resp.status, data: data };
+    });
+  })
+  .then(function(payload) {
+    var httpStatus = payload.httpStatus;
+    var data       = payload.data;
+
+    btn.innerHTML = '&#9654;&#65039; Update — analyze notes';
+    btn.classList.remove('loading');
+
+    if (httpStatus !== 200 || !data.ok) {
+      // ── Show the real error message on screen ──
+      var errMsg = data.error || ('HTTP ' + httpStatus + ' from /api/apex-ai');
+      if (data.detail) errMsg += ' — ' + data.detail;
+      if (data.fix)    errMsg += '. Fix: ' + data.fix;
+
+      // Display error banner inside the live screen
+      var banner = document.createElement('div');
+      banner.className = 'apex-api-notice';
+      banner.style.cssText = 'background:var(--rbg);border:1px solid var(--rbd);border-radius:10px;padding:10px 13px;margin-bottom:.875rem;font-size:12px;color:var(--red);line-height:1.5';
+      banner.innerHTML =
+        '<strong>❌ API error (HTTP ' + httpStatus + ')</strong><br>' + errMsg +
+        '<br><br><strong>⚡ Using offline fallback instead.</strong>' +
+        '<br><span style="opacity:.7">Tap the button again to retry.</span>';
+
+      var liveEl = el('cp-live');
+      if (liveEl) {
+        var old = liveEl.querySelector('.apex-api-notice');
+        if (old) old.remove();
+        liveEl.insertBefore(banner, liveEl.firstChild);
+      }
+
+      // Still apply local analysis so the app keeps working
+      cp_applyAnalysis(cp_analyse(fullNotes));
+      return;
+    }
+
+    // ── GPT success — apply the real result ──
+    cp_applyAnalysis(data.result);
+  })
+  .catch(function(networkErr) {
+    btn.innerHTML = '&#9654;&#65039; Update — analyze notes';
+    btn.classList.remove('loading');
+
+    var errMsg = networkErr.message || 'Network error';
+
+    var banner = document.createElement('div');
+    banner.className = 'apex-api-notice';
+    banner.style.cssText = 'background:var(--abg);border:1px solid var(--abd);border-radius:10px;padding:10px 13px;margin-bottom:.875rem;font-size:12px;color:var(--amb);line-height:1.5';
+    banner.innerHTML =
+      '<strong>⚠️ Cannot reach /api/apex-ai</strong><br>' + errMsg +
+      '<br><br><strong>Using offline fallback.</strong>' +
+      '<br><span style="opacity:.7">Check your internet connection or Vercel deployment.</span>';
+
+    var liveEl = el('cp-live');
+    if (liveEl) {
+      var old = liveEl.querySelector('.apex-api-notice');
+      if (old) old.remove();
+      liveEl.insertBefore(banner, liveEl.firstChild);
+    }
+
+    cp_applyAnalysis(cp_analyse(fullNotes));
+  });
+}
+
+
+// Shared renderer for both GPT and local copilot results
+function cp_applyAnalysis(result) {
+  if (!result) return;
+  _cp.lastAnalysis = result;
+
+  el('cp-mood-icon').textContent  = result.moodIcon || '😐';
+  el('cp-mood-val').textContent   = result.mood     || '–';
+  el('cp-intent-val').textContent = (result.intent  || 0) + '%';
+  el('cp-trust-val').textContent  = result.trust    || '–';
+  el('cp-risk-val').textContent   = result.risk     || '–';
+
+  var intent   = result.intent || 0;
+  var barColor = intent >= 65 ? 'var(--green)' : intent >= 40 ? 'var(--amb)' : 'var(--red)';
+  el('cp-intent-pct').textContent       = intent + '%';
+  el('cp-intent-fill').style.width      = intent + '%';
+  el('cp-intent-fill').style.background = barColor;
+  el('cp-intent-bar').style.display     = '';
+
+  var emotions = result.emotions || [{ label: 'Neutral', color: 'var(--muted)', bg: 'var(--s2)' }];
+  el('cp-emotion-wrap').style.display = '';
+  el('cp-emotion-wrap').innerHTML     = emotions.map(function(e) {
+    return '<span class="cp-emotion-tag active" style="background:' + e.bg + ';color:' + e.color + ';border-color:' + e.color + '">' + e.label + '</span>';
+  }).join('');
+
+  el('cp-say').textContent    = result.say    || '';
+  el('cp-warn').textContent   = result.warn   || '';
+  el('cp-action').textContent = result.action || '';
+  el('cp-coaching').style.display = '';
+
+  // ── Constitution fields: Best Next Question + Stage ──────
+  // bestQuestion and whyQuestion (Principles 3 & 7)
+  var bq = result.bestQuestion || '';
+  var wq = result.whyQuestion  || '';
+  if (bq) {
+    el('cp-best-question').textContent = bq;
+    el('cp-why-question').textContent  = wq;
+    el('cp-question-card').style.display = '';
+  } else {
+    el('cp-question-card').style.display = 'none';
+  }
+
+  // Conversation stage badge with colour coding
+  var stage = result.stage || '';
+  if (stage) {
+    var stageColors = {
+      'Discovery':      { bg: 'var(--bbg)',  color: 'var(--blue)'  },
+      'Trust Building': { bg: 'var(--gbg)',  color: 'var(--green)' },
+      'Comparing':      { bg: 'var(--abg)',  color: 'var(--amb)'   },
+      'Objection':      { bg: 'var(--rbg)',  color: 'var(--red)'   },
+      'Closing':        { bg: 'var(--gbg)',  color: 'var(--green)' },
+      'Follow-up':      { bg: 'var(--s2)',   color: 'var(--muted)' }
+    };
+    var sc = stageColors[stage] || { bg: 'var(--s2)', color: 'var(--text)' };
+    var badge = el('cp-stage-badge');
+    badge.textContent        = stage;
+    badge.style.background   = sc.bg;
+    badge.style.color        = sc.color;
+    el('cp-stage-wrap').style.display = '';
+  } else {
+    el('cp-stage-wrap').style.display = 'none';
+  }
+}
+
+
+function cp_showOutcome() {
+  el('cp-outcome-sheet').style.display = '';
+  el('cp-outcome-sheet').scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+function cp_endDeal(outcome) {
+  const elapsed = cp_now();
+  clearInterval(_cp.timerInterval);
+  _cp.active = false;
+
+  // Add final timeline entry
+  const outcomeLabel = { won:'Deal won ✅', lost:'Deal lost', think:'Still thinking', cancel:'Cancelled' }[outcome];
+  const tlDot = outcome;
+  _cp.timeline.push({ time: cp_timeStr(), elapsed, text: outcomeLabel, type: outcome });
+
+  // Build and save record
+  const record = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    ts: Date.now(),
+    outcome,
+    duration: elapsed,
+    notes: _cp.allNotes.join('\n\n--- update ---\n\n'),
+    timeline: [..._cp.timeline],
+    finalAnalysis: _cp.lastAnalysis,
+    updates: _cp.updates
+  };
+  const all = cp_loadHistory();
+  all.push(record);
+  cp_saveHistory(all);
+
+  // Timeline is now shown after the reflection modal (see cp_showTimeline)
+  el('cp-outcome-sheet').style.display = 'none';
+
+  // Auto-record to Memory Engine
+  if (_cp.lastAnalysis) {
+    const fa = _cp.lastAnalysis;
+    mem_record({
+      customerType: '', vehicle: '', budget: 0,
+      stage:       fa.intent >= 70 ? 'Negotiating' : fa.intent >= 45 ? 'Comparing' : 'Browsing',
+      objection:   '',
+      trust:       fa.trust || '',
+      intent:      fa.intent || 0,
+      closingProb: fa.intent || 0,
+      result:      outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' :
+                   outcome === 'think' ? 'Pending' : 'Cancelled',
+      src: 'copilot'
+    });
+  }
+
+  showToast('Deal saved to history');
+  sessionIncrement();
+  cp_renderHistory();
+  // Show reflection modal before showing timeline
+  _cp._pendingOutcome = outcome;
+  el('reflection-input').value = '';
+  const rm = el('reflection-modal');
+  if (rm) { rm.style.display = 'flex'; }
+}
+
+function cp_backToStart() {
+  clearInterval(_cp.timerInterval);
+  _cp = { active:false, startTime:null, timerInterval:null, notes:'', allNotes:[], timeline:[], updates:0, lastAnalysis:null };
+  // Reset all visible copilot UI
+  el('cp-live').style.display          = 'none';
+  el('cp-start').style.display         = 'flex';
+  el('cp-notes').value                 = '';
+  el('cp-update-btn').style.display    = '';
+  el('cp-end-btn').style.display       = '';
+  el('cp-timeline').style.display      = 'none';
+  el('cp-outcome-sheet').style.display = 'none';
+  el('cp-coaching').style.display      = 'none';
+  el('cp-intent-bar').style.display    = 'none';
+  el('cp-emotion-wrap').style.display  = 'none';
+  el('cp-question-card').style.display = 'none';
+  el('cp-stage-wrap').style.display    = 'none';
+  // Reset status card values
+  ['cp-mood-icon','cp-mood-val','cp-intent-val','cp-trust-val','cp-risk-val'].forEach(id => {
+    const e = el(id);
+    if (e) e.textContent = id === 'cp-mood-icon' ? '\u{1F610}' : '\u2013';
+  });
+  el('cp-intent-pct').textContent   = '0%';
+  el('cp-intent-fill').style.width  = '0%';
+  el('cp-timer').textContent        = '00:00';
+  // Reset live title
+  const titleEl = el('cp-live-title');
+  if (titleEl) titleEl.textContent = '\u{1F534} Live \u2014 deal in progress';
+}
+
+function cp_renderHistory() {
+  const q   = el('cp-hist-search') ? el('cp-hist-search').value.toLowerCase() : '';
+  const all = cp_loadHistory();
+  const filtered = q ? all.filter(e =>
+    (e.notes || '').toLowerCase().includes(q) ||
+    (e.outcome || '').includes(q)
+  ) : all;
+
+  const wrap = el('cp-hist-list');
+  if (!wrap) return;
+
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="es" style="padding:1.5rem 0"><div style="font-size:36px">&#9654;&#65039;</div><p>${all.length === 0 ? 'No live deals saved yet.<br>Start a deal and finish it to see history.' : 'No results match your search.'}</p></div>`;
+    return;
+  }
+
+  wrap.innerHTML = filtered.slice().sort((a,b)=>b.ts-a.ts).map(e => {
+    const dateStr = new Date(e.ts).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const notes   = (e.notes || '').replace(/--- update ---/g,'').trim();
+    const preview = notes.substring(0, 80) + (notes.length > 80 ? '…' : '');
+    const outLabel = { won:'Won ✅', lost:'Lost', think:'Still thinking', cancel:'Cancelled' }[e.outcome] || e.outcome;
+    return `<div class="cp-hist-card" onclick="cp_openReplay('${e.id}')">
+      <div class="cp-hist-top">
+        <div class="cp-hist-title">&#9654;&#65039; Deal · ${dateStr}</div>
+        <span class="cp-hist-badge ${e.outcome}">${outLabel}</span>
+      </div>
+      <div class="cp-hist-meta">Duration: ${e.duration} · ${e.updates} update${e.updates!==1?'s':''}</div>
+      <div class="cp-hist-notes-preview">${preview || 'No notes'}</div>
+    </div>`;
+  }).join('');
+}
+
+function cp_openReplay(id) {
+  const e = cp_loadHistory().find(x => x.id === id);
+  if (!e) return;
+  const dateStr = new Date(e.ts).toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const outLabel = { won:'Won ✅', lost:'Lost ❌', think:'Still thinking 💭', cancel:'Cancelled' }[e.outcome] || e.outcome;
+  const fa = e.finalAnalysis || {};
+
+  const tlHtml = (e.timeline||[]).map(t =>
+    `<div class="cp-tl-item">
+      <div class="cp-tl-dot ${t.type==='won'?'won':t.type==='lost'?'lost':t.type==='think'?'think':''}"></div>
+      <div class="cp-tl-time">${t.time}</div>
+      <div class="cp-tl-text">${t.text}</div>
+    </div>`
+  ).join('');
+
+  el('cp-replay-content').innerHTML = `
+    <div style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:.25rem">&#9654;&#65039; Deal replay</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:.875rem">${dateStr}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:.875rem">
+      <span class="cp-hist-badge ${e.outcome}">${outLabel}</span>
+      <span class="obl-tag">Duration: ${e.duration}</span>
+      <span class="obl-tag">${e.updates} update${e.updates!==1?'s':''}</span>
+      ${fa.intent ? `<span class="obl-tag">Intent: ${fa.intent}%</span>` : ''}
+      ${fa.trust  ? `<span class="obl-tag">Trust: ${fa.trust}</span>` : ''}
+    </div>
+    <div class="seg" style="margin-top:0">Timeline</div>
+    <div style="margin-bottom:.875rem">${tlHtml}</div>
+    <div class="seg">Notes</div>
+    <div style="background:var(--s2);border-radius:10px;padding:.875rem;font-size:13px;color:var(--text);line-height:1.7;white-space:pre-wrap;max-height:200px;overflow-y:auto">${e.notes || 'No notes'}</div>
+    ${fa.say ? `<div class="seg" style="margin-top:.875rem">Last coaching</div>
+    <div class="cp-coaching">
+      <div class="cp-coaching-row say"><div class="cp-coaching-icon">&#128161;</div><div><div class="cp-coaching-label">Say this next</div><div class="cp-coaching-text">${fa.say}</div></div></div>
+      <div class="cp-coaching-row action"><div class="cp-coaching-icon">&#9654;&#65039;</div><div><div class="cp-coaching-label">Next action</div><div class="cp-coaching-text">${fa.action}</div></div></div>
+    </div>` : ''}
+    <button class="btn" style="background:var(--rbg);color:var(--red);border:1px solid var(--rbd);margin-top:.875rem" onclick="cp_deleteReplay('${e.id}')">&#128465; Delete this deal</button>
+  `;
+  el('cp-replay').style.display = 'block';
+}
+
+function cp_deleteReplay(id) {
+  cp_saveHistory(cp_loadHistory().filter(e => e.id !== id));
+  cp_closeReplay(); showToast('Deal deleted'); cp_renderHistory();
+}
+
+function cp_closeReplay() {
+  el('cp-replay').style.display = 'none';
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 9b: APEX MEMORY ENGINE
+// ════════════════════════════════════════════════════════════════
+
+const MEM_KEY = 'apex_memory_v1';
+
+function mem_load()    { try { return JSON.parse(localStorage.getItem(MEM_KEY) || '[]'); } catch(e) { return []; } }
+function mem_save(arr) { try { localStorage.setItem(MEM_KEY, JSON.stringify(arr)); } catch(e) {} }
+
+// ── Record a deal event into memory ──
+// Called automatically after saving a customer or finishing a live deal
+function mem_record(entry) {
+  // entry shape: { customerType, vehicle, budget, stage, objection, trust, intent, closingProb, result, ts }
+  const all = mem_load();
+  all.push({ ...entry, id: Date.now().toString(36) + Math.random().toString(36).slice(2), ts: entry.ts || Date.now() });
+  mem_save(all);
+}
+
+// ── Helper: most frequent value in array ──
+function mem_mode(arr) {
+  if (!arr.length) return '—';
+  const freq = {};
+  arr.forEach(v => { if (v) freq[v] = (freq[v] || 0) + 1; });
+  return Object.entries(freq).sort((a,b) => b[1]-a[1])[0]?.[0] || '—';
+}
+
+// ── Helper: frequency map ──
+function mem_freq(arr) {
+  const freq = {};
+  arr.forEach(v => { if (v) freq[v] = (freq[v] || 0) + 1; });
+  return Object.entries(freq).sort((a,b) => b[1]-a[1]);
+}
+
+// ── Auto-harvest data from all existing stored records ──
+function mem_harvest() {
+  const records = [];
+
+  // Harvest from deal coach saves (SK = 'apex_v8')
+  try {
+    const coach = JSON.parse(localStorage.getItem('apex_v8') || '[]');
+    coach.forEach(c => {
+      const inp = c.input || {}, res = c.result || {}, prof = res.profile || {};
+      records.push({
+        customerType: prof.type || inp.motivation || '',
+        vehicle:      inp.car || '',
+        budget:       parseInt(inp.budget) || 0,
+        stage:        prof.stage || '',
+        objection:    inp.objection || '',
+        trust:        prof.trust || '',
+        intent:       prof.prob || 0,
+        closingProb:  prof.prob || 0,
+        result:       'pending',
+        ts:           c.ts || Date.now(),
+        src:          'coach'
+      });
+    });
+  } catch(e) {}
+
+  // Harvest from live copilot deals (CP_KEY = 'apex_copilot_v1')
+  try {
+    const copilot = JSON.parse(localStorage.getItem('apex_copilot_v1') || '[]');
+    copilot.forEach(d => {
+      const fa = d.finalAnalysis || {};
+      const notes = (d.notes || '').toLowerCase();
+      // extract vehicle hints from notes
+      const carHints = ['toyota','honda','mazda','hyundai','kia','bmw','mercedes','camry','vezel','cx-5','voxy','accord','yaris'];
+      let vehicle = '';
+      carHints.forEach(h => { if (notes.includes(h) && !vehicle) vehicle = h; });
+      records.push({
+        customerType: '',
+        vehicle,
+        budget:       0,
+        stage:        fa.intent >= 70 ? 'Negotiating' : fa.intent >= 45 ? 'Comparing' : 'Browsing',
+        objection:    notes.includes('monthly') ? 'Monthly too high' : notes.includes('wife') || notes.includes('spouse') ? 'Needs spouse approval' : notes.includes('expensive') ? 'Too expensive' : notes.includes('compare') ? 'Comparing dealers' : '',
+        trust:        fa.trust || '',
+        intent:       fa.intent || 0,
+        closingProb:  fa.intent || 0,
+        result:       d.outcome === 'won' ? 'Won' : d.outcome === 'lost' ? 'Lost' : d.outcome === 'think' ? 'Pending' : 'Cancelled',
+        ts:           d.ts || Date.now(),
+        src:          'copilot'
+      });
+    });
+  } catch(e) {}
+
+  // Merge with manually saved memory entries
+  const manual = mem_load();
+  // Deduplicate by ts+src
+  const seen = new Set(manual.map(m => m.ts + (m.src||'')));
+  const fresh = records.filter(r => !seen.has(r.ts + (r.src||'')));
+  if (fresh.length) mem_save([...manual, ...fresh]);
+}
+
+// ── Render the full Memory dashboard ──
+function mem_render() {
+  mem_harvest(); // pull in latest data first
+  const all = mem_load();
+
+  if (all.length === 0) {
+    el('mem-empty-state').style.display = '';
+    el('mem-dashboard').style.display   = 'none';
+    return;
+  }
+  el('mem-empty-state').style.display = 'none';
+  el('mem-dashboard').style.display   = '';
+
+  const won     = all.filter(d => (d.result||'').toLowerCase() === 'won').length;
+  const lost    = all.filter(d => (d.result||'').toLowerCase() === 'lost').length;
+  const decided = won + lost;
+  const rate    = decided > 0 ? Math.round((won / decided) * 100) : 0;
+
+  el('mem-total').textContent      = all.length;
+  el('mem-won').textContent        = won;
+  el('mem-lost').textContent       = lost;
+  el('mem-rate').textContent       = rate + '%';
+
+  const objections    = all.map(d => d.objection).filter(Boolean);
+  const vehicles      = all.map(d => d.vehicle).filter(Boolean);
+  const budgets       = all.map(d => d.budget).filter(b => b > 0);
+  const types         = all.map(d => d.customerType).filter(Boolean);
+  const stages        = all.map(d => d.stage).filter(Boolean);
+  const trusts        = all.map(d => d.trust).filter(Boolean);
+
+  el('mem-top-obj').textContent    = mem_mode(objections);
+  el('mem-top-car').textContent    = mem_mode(vehicles) || 'Insufficient data';
+  el('mem-avg-budget').textContent = budgets.length ? sgd(Math.round(budgets.reduce((a,b)=>a+b,0)/budgets.length)) : 'Insufficient data';
+  el('mem-top-type').textContent   = mem_mode(types) || 'Insufficient data';
+  el('mem-top-stage').textContent  = mem_mode(stages) || 'Insufficient data';
+  el('mem-top-trust').textContent  = mem_mode(trusts) || 'Insufficient data';
+
+  // ── AI Insights ──
+  const insights = [];
+  const n = all.length;
+
+  // Objection frequency
+  const objFreq = mem_freq(objections);
+  if (objFreq.length) {
+    const top = objFreq[0];
+    const pct = Math.round((top[1]/n)*100);
+    insights.push({ icon:'&#128172;', text: `${pct}% of your customers raised <strong>${top[0]}</strong> as their main concern — your most common objection by far.` });
+  }
+
+  // Won vs lost by objection
+  const lostDeals = all.filter(d => (d.result||'').toLowerCase() === 'lost' && d.objection);
+  if (lostDeals.length >= 2) {
+    const lostObj = mem_mode(lostDeals.map(d => d.objection));
+    insights.push({ icon:'&#9888;&#65039;', text: `Most of your lost deals involved <strong>${lostObj}</strong>. Preparing a stronger response to this objection could directly improve your close rate.` });
+  }
+
+  // Trust correlation
+  const highTrustDeals = all.filter(d => d.trust === 'High' && (d.result||'').toLowerCase() === 'won').length;
+  const highTrustTotal = all.filter(d => d.trust === 'High').length;
+  const lowTrustWon    = all.filter(d => d.trust === 'Low' && (d.result||'').toLowerCase() === 'won').length;
+  const lowTrustTotal  = all.filter(d => d.trust === 'Low').length;
+  if (highTrustTotal >= 2 && lowTrustTotal >= 2) {
+    const htRate = Math.round((highTrustDeals/highTrustTotal)*100);
+    const ltRate = Math.round((lowTrustWon/lowTrustTotal)*100);
+    if (htRate > ltRate) insights.push({ icon:'&#129309;', text: `Customers with <strong>High Trust</strong> close at ${htRate}% vs only ${ltRate}% for Low Trust customers — investing in trust-building early pays off ${Math.round(htRate/Math.max(ltRate,1))}x.` });
+  }
+
+  // Vehicle / type insights
+  const vehicleFreq = mem_freq(vehicles);
+  if (vehicleFreq.length >= 2) {
+    const topV = vehicleFreq[0];
+    const topVPct = Math.round((topV[1]/n)*100);
+    insights.push({ icon:'&#128663;', text: `<strong>${topV[0]}</strong> is your most discussed vehicle, coming up in ${topVPct}% of your saved deals.` });
+  }
+
+  // Stage insights
+  const stageFreq = mem_freq(stages);
+  if (stageFreq.length) {
+    const topStage = stageFreq[0];
+    insights.push({ icon:'&#128200;', text: `The most common buying stage in your deals is <strong>${topStage[0]}</strong> — this tells you where most of your pipeline currently sits.` });
+  }
+
+  // Budget insight
+  if (budgets.length >= 3) {
+    const maxB = Math.max(...budgets), minB = Math.min(...budgets);
+    const avgB = Math.round(budgets.reduce((a,b)=>a+b,0)/budgets.length);
+    insights.push({ icon:'&#128181;', text: `Your customers' budgets range from ${sgd(minB)} to ${sgd(maxB)}, averaging <strong>${sgd(avgB)}</strong>. Keep finance scenarios ready within this range.` });
+  }
+
+  // Copilot deal outcomes
+  const copilotDeals = all.filter(d => d.src === 'copilot');
+  if (copilotDeals.length >= 2) {
+    const cpWon  = copilotDeals.filter(d => (d.result||'').toLowerCase() === 'won').length;
+    const cpRate = Math.round((cpWon/copilotDeals.length)*100);
+    insights.push({ icon:'&#9654;&#65039;', text: `You've run <strong>${copilotDeals.length} live deals</strong> with the Copilot — winning ${cpRate}% of them. Live coaching is working for you.` });
+  }
+
+  // Pending deals
+  const pending = all.filter(d => (d.result||'').toLowerCase() === 'pending').length;
+  if (pending > 0) insights.push({ icon:'&#9200;', text: `You have <strong>${pending} pending deal${pending!==1?'s':''}</strong> still open. Follow up within 48 hours — deals that go cold after 2 days rarely recover.` });
+
+  if (insights.length === 0) insights.push({ icon:'&#129504;', text: 'Complete more deals to generate personalised AI insights about your sales patterns.' });
+
+  el('mem-insights').innerHTML = insights.slice(0, 6).map(ins =>
+    `<div class="mem-insight"><div class="mem-insight-icon">${ins.icon}</div><div class="mem-insight-text">${ins.text}</div></div>`
+  ).join('');
+
+  // ── Success strategies ranked ──
+  const strategies = [
+    { name: 'Show finance breakdown upfront',            matchFn: d => d.objection && (d.objection.toLowerCase().includes('monthly') || d.objection.toLowerCase().includes('instalment')) },
+    { name: 'Invite spouse / partner in',                matchFn: d => d.objection && (d.objection.toLowerCase().includes('wife') || d.objection.toLowerCase().includes('spouse')) },
+    { name: 'Lead with depreciation story',              matchFn: d => (d.stage||'').includes('Compar') },
+    { name: 'Arrange test drive early',                  matchFn: d => (d.stage||'').includes('Negotiat') },
+    { name: 'Trust-building before price discussion',    matchFn: d => d.trust === 'High' },
+    { name: 'Offer trade-in valuation on the spot',      matchFn: d => d.objection && d.objection.toLowerCase().includes('trade') },
+    { name: 'Reframe price as daily cost',               matchFn: d => d.objection && d.objection.toLowerCase().includes('expens') },
+    { name: 'Use competitor comparison',                  matchFn: d => d.objection && d.objection.toLowerCase().includes('compar') }
+  ];
+
+  const stratResults = strategies.map(s => {
+    const matching     = all.filter(s.matchFn);
+    const matchingWon  = matching.filter(d => (d.result||'').toLowerCase() === 'won').length;
+    const matchingDec  = matching.filter(d => ['won','lost'].includes((d.result||'').toLowerCase())).length;
+    const rate         = matchingDec >= 1 ? Math.round((matchingWon / matchingDec) * 100) : null;
+    return { ...s, matching: matching.length, rate };
+  }).filter(s => s.matching >= 1 && s.rate !== null).sort((a,b) => b.rate - a.rate);
+
+  if (stratResults.length === 0) {
+    el('mem-strategies').innerHTML = `<div style="font-size:13px;color:var(--muted);padding:.5rem 0">Complete more deals to rank strategies automatically.</div>`;
+  } else {
+    el('mem-strategies').innerHTML = stratResults.slice(0, 5).map(s => {
+      const barColor = s.rate >= 70 ? 'var(--green)' : s.rate >= 50 ? 'var(--amb)' : 'var(--red)';
+      return `<div class="mem-strat-card">
+        <div class="mem-strat-name">${s.name}</div>
+        <div class="mem-strat-bar-wrap"><div class="mem-strat-bg"><div class="mem-strat-fill" style="width:${s.rate}%;background:${barColor}"></div></div></div>
+        <div class="mem-strat-pct" style="color:${barColor}">${s.rate}%</div>
+      </div>`;
+    }).join('');
+  }
+}
+
+// ── Similar customer lookup ──
+function mem_lookup() {
+  const query = (el('mem-lookup-input').value || '').toLowerCase().trim();
+  const wrap  = el('mem-lookup-result');
+  if (!query || query.length < 3) { wrap.innerHTML = ''; return; }
+
+  mem_harvest();
+  const all = mem_load();
+  if (all.length === 0) { wrap.innerHTML = `<div style="font-size:13px;color:var(--muted)">No memory data yet.</div>`; return; }
+
+  // Find similar: match on objection keywords or vehicle or type
+  const keywords = query.split(/\s+/);
+  const similar = all.filter(d => {
+    const haystack = [d.objection, d.vehicle, d.customerType, d.stage].join(' ').toLowerCase();
+    return keywords.some(kw => kw.length > 2 && haystack.includes(kw));
+  });
+
+  if (similar.length === 0) { wrap.innerHTML = `<div style="font-size:13px;color:var(--muted)">No similar customers found yet.</div>`; return; }
+
+  const simWon  = similar.filter(d => (d.result||'').toLowerCase() === 'won').length;
+  const simDec  = similar.filter(d => ['won','lost'].includes((d.result||'').toLowerCase())).length;
+  const simRate = simDec > 0 ? Math.round((simWon/simDec)*100) : null;
+  const simObj  = mem_mode(similar.map(d => d.objection).filter(Boolean));
+  const simVeh  = mem_mode(similar.map(d => d.vehicle).filter(Boolean));
+
+  wrap.innerHTML = `<div class="mem-similar-box">
+    <div class="mem-similar-title">&#129504; I've seen ${similar.length} similar customer${similar.length!==1?'s':''}</div>
+    ${simRate !== null ? `<div class="mem-similar-row"><span class="mem-similar-lbl">Average closing rate</span><span class="mem-similar-val">${simRate}%</span></div>` : ''}
+    ${simObj !== '—'  ? `<div class="mem-similar-row"><span class="mem-similar-lbl">Most common objection</span><span class="mem-similar-val">${simObj}</span></div>` : ''}
+    ${simVeh          ? `<div class="mem-similar-row"><span class="mem-similar-lbl">Most discussed vehicle</span><span class="mem-similar-val">${simVeh}</span></div>` : ''}
+    <div class="mem-similar-row"><span class="mem-similar-lbl">Best approach</span><span class="mem-similar-val">${simRate >= 60 ? 'High close rate — stay the course' : simRate >= 40 ? 'Moderate — address main objection directly' : 'Challenging segment — lead with trust, not price'}</span></div>
+  </div>`;
+}
+
+// ── Export memory as JSON file ──
+function mem_export() {
+  mem_harvest();
+  const all = mem_load();
+  if (!all.length) { showToast('No memory data to export'); return; }
+  const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), version: 'apex_memory_v1', records: all }, null, 2)], { type: 'application/json' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `apex_memory_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  showToast('Memory exported as JSON');
+}
+
+// ── Import memory from JSON file ──
+function mem_import(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data    = JSON.parse(e.target.result);
+      const records = data.records || (Array.isArray(data) ? data : []);
+      if (!records.length) { showToast('No valid records found in file'); return; }
+      const existing = mem_load();
+      const existingIds = new Set(existing.map(r => r.id).filter(Boolean));
+      const fresh = records.filter(r => !r.id || !existingIds.has(r.id));
+      mem_save([...existing, ...fresh]);
+      showToast(`Imported ${fresh.length} new record${fresh.length!==1?'s':''}`);
+      mem_render();
+    } catch(err) { showToast('Import failed — invalid JSON file'); }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+// ── Reset / clear memory ──
+function mem_reset() {
+  if (!confirm('Clear ALL Apex Memory? This cannot be undone.\n\nYour saved customers and live deals are not affected — only the memory database is cleared.')) return;
+  localStorage.removeItem(MEM_KEY);
+  showToast('Apex Memory cleared');
+  mem_render();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 10: APEX AI BRIDGE (FIXED v2)
+// Calls /api/apex-ai (OpenAI GPT on Vercel).
+// Shows real error messages. Falls back to local logic with a
+// visible "Using offline fallback" indicator when API is down.
+// ════════════════════════════════════════════════════════════════
+
+const APEX_API = '/api/apex-ai';
+
+// Show a dismissible error banner inside the given container id
+function apexShowError(containerId, errorMsg, isFallback) {
+  const wrap = el(containerId);
+  if (!wrap) return;
+  const existing = wrap.querySelector('.apex-api-notice');
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.className = 'apex-api-notice';
+  div.style.cssText = [
+    'background:' + (isFallback ? 'var(--abg)' : 'var(--rbg)'),
+    'border:1px solid ' + (isFallback ? 'var(--abd)' : 'var(--rbd)'),
+    'border-radius:10px',
+    'padding:10px 13px',
+    'margin-bottom:.875rem',
+    'font-size:12px',
+    'color:' + (isFallback ? 'var(--amb)' : 'var(--red)'),
+    'display:flex',
+    'gap:8px',
+    'align-items:flex-start',
+    'line-height:1.5'
+  ].join(';');
+  div.innerHTML = (isFallback ? '⚠️' : '❌') + ' <div><strong>' +
+    (isFallback ? 'Using offline fallback — ' : 'API error — ') +
+    '</strong>' + errorMsg + '</div>';
+  wrap.insertBefore(div, wrap.firstChild);
+}
+
+// Core API call — returns parsed result object or null on failure
+async function apexAI(moduleName, input, context) {
+  try {
+    const resp = await fetch(APEX_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ module: moduleName, input, context: context || null })
+    });
+
+    const data = await resp.json().catch(() => ({ ok: false, error: 'Response was not JSON' }));
+
+    if (!resp.ok || !data.ok) {
+      const msg = data.error || ('HTTP ' + resp.status);
+      console.warn('[ApexAI] ' + moduleName + ' error:', msg);
+      return { error: msg, fallback: true };
+    }
+
+    if (!data.result) {
+      return { error: 'API returned empty result', fallback: true };
+    }
+
+    return data.result;  // success — GPT result object
+
+  } catch (err) {
+    // Network failure (offline, DNS, CORS, etc.)
+    const msg = err.message || 'Network error';
+    console.warn('[ApexAI] ' + moduleName + ' network failure:', msg);
+    return { error: msg, fallback: true };
+  }
+}
+
+// Shared render helper used by both GPT and local coach paths
+function renderCoachResult(r, prof, d) {
+  el('p-type').textContent = prof.type; el('p-type-icon').textContent = prof.typeIcon;
+  el('p-stage').textContent = prof.stage; el('p-stage-icon').textContent = prof.stageIcon;
+  el('p-trust').textContent = prof.trust; el('p-trust-icon').textContent = prof.trustIcon;
+  el('p-urgency').textContent = prof.urgency;
+  el('p-prob').textContent = prof.prob + '%';
+  el('p-prob-bar').style.width = prof.prob + '%';
+  el('p-prob-bar').style.background = prof.probColor;
+
+  const concerns  = r.concerns  || [];
+  const questions = r.questions || [];
+  const warnings  = r.warnings  || [];
+  const strategy  = r.strategy  || [];
+
+  el('concerns-wrap').innerHTML = concerns.map(function(c) {
+    return '<div class="cc"><div class="cdot" style="background:' + (c.dot||'#888') + '"></div><div><div class="ct">' + c.text + '</div><div class="cs">' + (c.sub||'') + '</div></div></div>';
+  }).join('');
+  el('questions-wrap').innerHTML = questions.map(function(q, i) {
+    return '<div class="qc"><div class="qn">' + (i+1) + '</div><div class="qt">' + q + '</div></div>';
+  }).join('');
+  el('warnings-wrap').innerHTML = warnings.map(function(w) {
+    return '<div class="wc"><div class="wh">⚠️ Warning</div><div class="wm">' + w.main + '</div><div class="wr">Reason: ' + w.why + '</div></div>';
+  }).join('');
+  el('strategy-wrap').innerHTML = strategy.map(function(s, i) {
+    return '<div class="sc"><div class="sn">Step ' + (i+1) + '</div><div><div class="st">' + s.t + '</div><div class="sd">' + s.d + '</div></div></div>';
+  }).join('');
+
+  el('coach-wa').textContent = r.whatsapp || '';
+  el('r-profile').innerHTML = [
+    pill('Name', d.name), pill('Motivation', d.motivation), pill('Car', d.car),
+    pill('Budget',      d.budget  ? sgd(parseInt(d.budget))  : ''),
+    pill('Downpayment', d.dp     ? sgd(parseInt(d.dp))      : ''),
+    pill('Monthly',     d.monthly ? sgd(parseInt(d.monthly)) + '/mo' : ''),
+    pill('Tenure', d.tenure), pill('Trade-in', d.tradein),
+    pill('Timeline', d.timeline), pill('Viewed', d.showrooms)
+  ].join('');
+  el('r-concern').textContent  = r.concern    || '';
+  el('r-response').textContent = r.resp       || '';
+  el('r-discount').textContent = r.discount   || '';
+  el('r-finance').textContent  = r.finance    || '';
+  el('r-trust').innerHTML = (r.trust||[]).map(function(t){ return '<li>' + t + '</li>'; }).join('');
+  var rc = r.risk === 'High' ? 'rh' : r.risk === 'Medium' ? 'rm' : 'rl';
+  el('r-risk').innerHTML = '<span class="rbadge ' + rc + '">' + (r.risk||'Medium') + ' risk</span>';
+  el('r-risk-reason').textContent = r.riskReason || '';
+}
+
+// ── API connectivity test ──
+function cp_testAPI() {
+  var resultEl = el('cp-api-test-result');
+  if (resultEl) resultEl.innerHTML = '<span style="color:var(--muted)">&#128312; Testing...</span>';
+
+  fetch('/api/apex-ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      module: 'live_copilot',
+      input:  { notes: 'API connectivity test' },
+      context: {}
+    })
+  })
+  .then(function(resp) {
+    return resp.json().then(function(d){ return { status: resp.status, data: d }; });
+  })
+  .then(function(p) {
+    if (!resultEl) return;
+    if (p.status === 200 && p.data.ok) {
+      resultEl.innerHTML = '<span style="color:var(--green)">&#9989; API connected! GPT-4o mini is ready.</span>';
+    } else {
+      var msg = (p.data && p.data.error) ? p.data.error : ('HTTP ' + p.status);
+      resultEl.innerHTML = '<span style="color:var(--red)">&#10060; ' + msg + '</span>';
+    }
+  })
+  .catch(function(err) {
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--red)">&#10060; Cannot reach /api/apex-ai — ' + (err.message||'network error') + '</span>';
+  });
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// SESSION COUNTER — tracks deals saved today, resets daily
+// ════════════════════════════════════════════════════════════════
+
+const SESSION_KEY = 'apex_session_v1';
+
+function sessionGetCount() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+    const today = new Date().toDateString();
+    if (raw.date !== today) return 0;
+    return raw.count || 0;
+  } catch(e) { return 0; }
+}
+
+function sessionIncrement() {
+  try {
+    const today = new Date().toDateString();
+    const count = sessionGetCount() + 1;
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ date: today, count }));
+    updateTodayCounter();
+  } catch(e) {}
+}
+
+function updateTodayCounter() {
+  const el_today = el('today-count');
+  if (el_today) el_today.textContent = sessionGetCount();
+}
+
+// ════════════════════════════════════════════════════════════════
+// DEAL SAVED MODAL — appears after saveCustomer() succeeds
+// ════════════════════════════════════════════════════════════════
+
+function showDealSavedModal() {
+  const m = el('deal-saved-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function hideDealSavedModal() {
+  const m = el('deal-saved-modal');
+  if (m) m.style.display = 'none';
+}
+
+// Modal button: Start New Customer
+function modal_startNew() {
+  hideDealSavedModal();
+  // Reset deal coach form and results
+  cp_startNewCustomer_coach();
+}
+
+// Modal button: Continue This Customer
+function modal_continue() {
+  hideDealSavedModal();
+  // Just close — current state stays intact
+}
+
+// Modal button: View Memory
+function modal_viewMemory() {
+  hideDealSavedModal();
+  showPage('memory');
+}
+
+// Reset the coach form for a fresh customer (coach tab)
+function cp_startNewCustomer_coach() {
+  // Clear all input fields
+  ['name','motivation','car','budget','dp','monthly','tenure','tradein',
+   'objection','showrooms','notes','timeline'].forEach(id => {
+    const e = el(id);
+    if (!e) return;
+    if (e.tagName === 'SELECT') e.value = '';
+    else e.value = '';
+  });
+  // Hide results
+  const report = el('report');
+  if (report) report.style.display = 'none';
+  // Reset save button
+  const sb = el('saveBtn');
+  if (sb) { sb.innerHTML = '&#128190; Save Deal'; sb.classList.remove('saved'); sb.disabled = false; }
+  // Reset internal state
+  _lastInput = null; _lastResult = null;
+  // Scroll back to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  showPage('coach');
+  showToast('Ready for next customer');
+}
+
+// ════════════════════════════════════════════════════════════════
+// START NEW CUSTOMER — copilot tab button + confirmation guard
+// ════════════════════════════════════════════════════════════════
+
+function cp_startNewCustomer() {
+  // Check if there are unsaved notes
+  const hasNotes = _cp.active && _cp.allNotes.length > 0;
+  if (hasNotes) {
+    if (!confirm('Discard current conversation?\nThis will clear all notes and AI suggestions.\nSaved deals are NOT affected.')) {
+      return; // user cancelled
+    }
+  }
+  cp_backToStart();
+  showToast('Ready for next customer');
+}
+
+// ════════════════════════════════════════════════════════════════
+// REFLECTION MODAL — save a lesson learned after finishing a deal
+// ════════════════════════════════════════════════════════════════
+
+let _pendingReflectionDealId = null;
+
+function reflection_skip() {
+  const rm = el('reflection-modal');
+  if (rm) rm.style.display = 'none';
+  cp_showTimeline();
+}
+
+function reflection_save() {
+  const text = (el('reflection-input').value || '').trim();
+  if (text) {
+    // Attach reflection to the most recently saved copilot deal
+    try {
+      const all = cp_loadHistory();
+      if (all.length > 0) {
+        all[all.length - 1].reflection = text;
+        cp_saveHistory(all);
+      }
+    } catch(e) {}
+    showToast('Reflection saved');
+  }
+  const rm = el('reflection-modal');
+  if (rm) rm.style.display = 'none';
+  cp_showTimeline();
+}
+
+// Show the timeline after reflection is handled
+function cp_showTimeline() {
+  el('cp-tl-items').innerHTML = _cp.timeline.map(t =>
+    '<div class="cp-tl-item">' +
+    '<div class="cp-tl-dot ' + (t.type === 'won' ? 'won' : t.type === 'lost' ? 'lost' : t.type === 'think' ? 'think' : '') + '"></div>' +
+    '<div class="cp-tl-time">' + t.time + '</div>' +
+    '<div class="cp-tl-text">' + t.text + '</div>' +
+    '</div>'
+  ).join('');
+  el('cp-timeline').style.display      = '';
+  el('cp-update-btn').style.display    = 'none';
+  el('cp-end-btn').style.display       = 'none';
+  el('cp-timeline').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 11: INIT
+// ════════════════════════════════════════════════════════════════
+updateBadge();
+renderObjLibrary();
+renderVmHistory();
+cp_renderHistory();
+mem_harvest(); // pull in any existing data on first load
+updateTodayCounter(); // show today's deal count
