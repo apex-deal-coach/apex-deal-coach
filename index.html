@@ -1030,6 +1030,24 @@ textarea{resize:vertical;min-height:58px}
       </div>
     </div>
 
+    <!-- Best Next Question (Constitution principle 3 & 7) -->
+    <div class="cp-coaching" id="cp-question-card" style="display:none;margin-top:.625rem;border-color:var(--bbd)">
+      <div class="cp-coaching-row" style="background:var(--bbg)">
+        <div class="cp-coaching-icon">&#10067;</div>
+        <div style="flex:1">
+          <div class="cp-coaching-label" style="color:var(--blue)">Best next question</div>
+          <div class="cp-coaching-text" id="cp-best-question" style="color:var(--blue)"></div>
+          <div style="font-size:11px;color:var(--blue);opacity:.7;margin-top:5px;line-height:1.4" id="cp-why-question"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Conversation Stage badge -->
+    <div id="cp-stage-wrap" style="display:none;margin-top:.625rem;margin-bottom:.25rem">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Conversation stage&#8194;</span>
+      <span id="cp-stage-badge" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--s2);color:var(--text)"></span>
+    </div>
+
     <!-- Notes input -->
     <div class="seg" style="margin-top:.25rem">Your live notes</div>
     <textarea class="cp-notes" id="cp-notes" placeholder="Type as you talk&#10;&#10;e.g.&#10;Customer says monthly too high&#10;Likes Toyota&#10;Wife prefers SUV&#10;Has Honda Fit trade-in"></textarea>
@@ -2730,8 +2748,10 @@ function cp_startDeal() {
   el('cp-coaching').style.display     = 'none';
   el('cp-intent-bar').style.display   = 'none';
   el('cp-emotion-wrap').style.display = 'none';
-  el('cp-outcome-sheet').style.display = 'none';
-  el('cp-timeline').style.display      = 'none';
+  el('cp-outcome-sheet').style.display  = 'none';
+  el('cp-timeline').style.display       = 'none';
+  el('cp-question-card').style.display  = 'none';
+  el('cp-stage-wrap').style.display     = 'none';
 
   // Reset stat cards
   ['cp-mood-val','cp-intent-val','cp-trust-val','cp-risk-val'].forEach(id => el(id).textContent = '–');
@@ -2951,16 +2971,16 @@ function cp_applyAnalysis(result) {
   el('cp-trust-val').textContent  = result.trust    || '–';
   el('cp-risk-val').textContent   = result.risk     || '–';
 
-  var intent    = result.intent || 0;
-  var barColor  = intent >= 65 ? 'var(--green)' : intent >= 40 ? 'var(--amb)' : 'var(--red)';
-  el('cp-intent-pct').textContent          = intent + '%';
-  el('cp-intent-fill').style.width         = intent + '%';
-  el('cp-intent-fill').style.background    = barColor;
-  el('cp-intent-bar').style.display        = '';
+  var intent   = result.intent || 0;
+  var barColor = intent >= 65 ? 'var(--green)' : intent >= 40 ? 'var(--amb)' : 'var(--red)';
+  el('cp-intent-pct').textContent       = intent + '%';
+  el('cp-intent-fill').style.width      = intent + '%';
+  el('cp-intent-fill').style.background = barColor;
+  el('cp-intent-bar').style.display     = '';
 
   var emotions = result.emotions || [{ label: 'Neutral', color: 'var(--muted)', bg: 'var(--s2)' }];
-  el('cp-emotion-wrap').style.display  = '';
-  el('cp-emotion-wrap').innerHTML      = emotions.map(function(e) {
+  el('cp-emotion-wrap').style.display = '';
+  el('cp-emotion-wrap').innerHTML     = emotions.map(function(e) {
     return '<span class="cp-emotion-tag active" style="background:' + e.bg + ';color:' + e.color + ';border-color:' + e.color + '">' + e.label + '</span>';
   }).join('');
 
@@ -2968,6 +2988,39 @@ function cp_applyAnalysis(result) {
   el('cp-warn').textContent   = result.warn   || '';
   el('cp-action').textContent = result.action || '';
   el('cp-coaching').style.display = '';
+
+  // ── Constitution fields: Best Next Question + Stage ──────
+  // bestQuestion and whyQuestion (Principles 3 & 7)
+  var bq = result.bestQuestion || '';
+  var wq = result.whyQuestion  || '';
+  if (bq) {
+    el('cp-best-question').textContent = bq;
+    el('cp-why-question').textContent  = wq;
+    el('cp-question-card').style.display = '';
+  } else {
+    el('cp-question-card').style.display = 'none';
+  }
+
+  // Conversation stage badge with colour coding
+  var stage = result.stage || '';
+  if (stage) {
+    var stageColors = {
+      'Discovery':      { bg: 'var(--bbg)',  color: 'var(--blue)'  },
+      'Trust Building': { bg: 'var(--gbg)',  color: 'var(--green)' },
+      'Comparing':      { bg: 'var(--abg)',  color: 'var(--amb)'   },
+      'Objection':      { bg: 'var(--rbg)',  color: 'var(--red)'   },
+      'Closing':        { bg: 'var(--gbg)',  color: 'var(--green)' },
+      'Follow-up':      { bg: 'var(--s2)',   color: 'var(--muted)' }
+    };
+    var sc = stageColors[stage] || { bg: 'var(--s2)', color: 'var(--text)' };
+    var badge = el('cp-stage-badge');
+    badge.textContent        = stage;
+    badge.style.background   = sc.bg;
+    badge.style.color        = sc.color;
+    el('cp-stage-wrap').style.display = '';
+  } else {
+    el('cp-stage-wrap').style.display = 'none';
+  }
 }
 
 
