@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Apex Deal Coach</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div class="app">
+
+<!-- LOGO -->
+<div class="logo">
+  <div class="li"><span>A</span></div>
+  <div class="lt"><h1>Apex Deal Coach</h1><p>Singapore car sales · v12</p></div>
+</div>
+
+<!-- NAVIGATION (9 tabs — scrollable) -->
+<div style="overflow-x:auto;margin-bottom:.75rem;-webkit-overflow-scrolling:touch;scrollbar-width:none">
+<div class="nav" style="grid-template-columns:repeat(9,1fr);min-width:630px">
+  <button class="nb active" id="nav-coach"    onclick="showPage('coach')">&#129504;<br>Coach</button>
+  <button class="nb"        id="nav-copilot"  onclick="showPage('copilot')">&#9654;&#65039;<br>Copilot</button>
+  <button class="nb"        id="nav-memory"   onclick="showPage('memory')">&#129504;<br>Memory</button>
+  <button class="nb"        id="nav-match"    onclick="showPage('match')">&#127775;<br>Match</button>
+  <button class="nb"        id="nav-objection" onclick="showPage('objection')">&#129504;<br>Objection</button>
+  <button class="nb"        id="nav-followup"  onclick="showPage('followup')">&#128172;<br>Follow-up</button>
+  <button class="nb"        id="nav-calc"      onclick="showPage('calc')">&#129518;<br>Finance</button>
+  <button class="nb"        id="nav-compare"   onclick="showPage('compare')">&#9878;&#65039;<br>Compare</button>
+  <button class="nb"        id="nav-history"   onclick="showPage('history')">&#128101;<br>History <span class="bc" id="hist-count" style="display:none"></span></button>
+</div>
+</div>
+
+<!-- ================================================================
+     PAGE: DEAL COACH
+================================================================ -->
+<div class="page active" id="page-coach">
+  <div class="sec">
+    <div class="stitle">&#128100; Customer Info</div>
+    <div class="f"><label>Customer name</label><input type="text" id="name" placeholder="e.g. Mr Tan Wei Liang"></div>
+    <div class="f"><label>Motivation</label>
+      <select id="motivation"><option value="">Select motivation</option><option>Status</option><option>Convenience</option><option>Family</option><option>Budget</option><option>Performance</option><option>Unknown</option></select>
+    </div>
+    <div class="f"><label>Car interested in</label><input type="text" id="car" placeholder="e.g. Toyota Camry 2.5"></div>
+    <div class="f"><label>Buying timeline</label>
+      <select id="timeline"><option value="">Select timeline</option><option>Within 1 week</option><option>2–4 weeks</option><option>1–3 months</option><option>3–6 months</option><option>Just browsing</option></select>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="stitle">&#128181; Financials</div>
+    <div class="f"><label>Total budget (SGD)</label><input type="number" id="budget" placeholder="e.g. 120000"></div>
+    <div class="f"><label>Downpayment (SGD)</label><input type="number" id="dp" placeholder="e.g. 20000"></div>
+    <div class="f"><label>Desired monthly instalment (SGD)</label><input type="number" id="monthly" placeholder="e.g. 1500"></div>
+    <div class="f"><label>Loan tenure</label>
+      <select id="tenure"><option value="">Select tenure</option><option>3 years</option><option>4 years</option><option>5 years</option><option>6 years</option><option>7 years</option></select>
+    </div>
+    <div class="f"><label>Trade-in car</label><input type="text" id="tradein" placeholder="e.g. 2018 Honda Civic (or none)"></div>
+  </div>
+  <div class="sec">
+    <div class="stitle">&#128722; Deal Context</div>
+    <div class="f"><label>Objection heard</label><input type="text" id="objection" placeholder='"Too expensive", "Need to think"'></div>
+    <div class="f"><label>Showrooms / cars already viewed</label>
+      <select id="showrooms"><option value="">Select</option><option>This is their first</option><option>1–2 others</option><option>3–5 others</option><option>5+ others</option></select>
+    </div>
+    <div class="f"><label>Notes</label><textarea id="notes" placeholder="Anything else about this customer..."></textarea></div>
+  </div>
+  <button class="btn bd" id="analyzeBtn" onclick="analyze()">&#129504; Analyze deal</button>
+
+  <div id="report" style="display:none">
+    <div class="seg">AI Customer Profile</div>
+    <div class="sec" style="padding:1rem">
+      <div class="pg">
+        <div class="pc"><span class="pci" id="p-type-icon"></span><div class="pcl">Customer type</div><div class="pcv" id="p-type"></div></div>
+        <div class="pc"><span class="pci" id="p-stage-icon"></span><div class="pcl">Buying stage</div><div class="pcv" id="p-stage"></div></div>
+        <div class="pc"><span class="pci" id="p-trust-icon"></span><div class="pcl">Trust level</div><div class="pcv" id="p-trust"></div></div>
+        <div class="pc"><span class="pci">&#127919;</span><div class="pcl">Urgency</div><div class="pcv" id="p-urgency"></div></div>
+      </div>
+      <div class="prob-wrap" style="margin-bottom:0">
+        <div class="prob-row"><span class="prob-lbl">Closing probability</span><span class="prob-num" id="p-prob">0%</span></div>
+        <div class="prob-track"><div class="prob-bar" id="p-prob-bar" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="seg">Hidden Concerns</div><div id="concerns-wrap"></div>
+    <div class="seg">Next Questions to Ask</div><div id="questions-wrap"></div>
+    <div class="seg">What Not to Do</div><div id="warnings-wrap"></div>
+    <div class="seg">Best Sales Strategy</div><div id="strategy-wrap"></div>
+    <div class="seg">WhatsApp Follow-up</div>
+    <div class="sec" style="padding:1rem"><div class="bub" id="coach-wa"></div></div>
+    <div class="seg">Full Analysis</div>
+    <div class="rs"><h3>Buyer profile</h3><div class="plg" id="r-profile"></div></div>
+    <div class="rs"><h3>Concern detail</h3><p id="r-concern"></p></div>
+    <div class="rs"><h3>Suggested response</h3><p id="r-response"></p></div>
+    <div class="rs"><h3>Discount handling</h3><p id="r-discount"></p></div>
+    <div class="rs"><h3>Finance explanation</h3><p id="r-finance"></p></div>
+    <div class="rs"><h3>Trust-building</h3><ul id="r-trust"></ul></div>
+    <div class="rs"><h3>Deal risk</h3><div id="r-risk"></div><p style="margin-top:8px" id="r-risk-reason"></p></div>
+    <button class="btn bg" id="saveBtn" onclick="saveCustomer()">&#128190; Save customer</button>
+  </div>
+</div>
+
+<!-- ================================================================
+     PAGE: FOLLOW-UP ENGINE
+================================================================ -->
+<div class="page" id="page-followup">
+  <div class="sec">
+    <div class="stitle">&#128100; Customer Details</div>
+    <div class="f"><label>Customer name</label><input type="text" id="fu-name" placeholder="e.g. Mr Lim Boon Keng"></div>
+    <div class="f"><label>Car interested in</label><input type="text" id="fu-car" placeholder="e.g. Honda CR-V 1.5T"></div>
+    <div class="f"><label>Main objection / concern</label><input type="text" id="fu-obj" placeholder='"Price too high", "Wife not sure"'></div>
+  </div>
+  <div class="sec">
+    <div class="stitle">&#128200; Situation</div>
+    <div class="f"><label>Last interaction</label>
+      <select id="fu-interaction"><option value="">Select last interaction</option><option>Walk-in</option><option>Test drive</option><option>Phone call</option><option>WhatsApp</option><option>Viewing</option><option>Quotation sent</option></select>
+    </div>
+    <div class="f"><label>Customer status</label>
+      <select id="fu-status"><option value="">Select customer status</option><option>New lead</option><option>Comparing</option><option>Negotiating</option><option>Waiting for spouse</option><option>Waiting for loan approval</option><option>Ghosted</option><option>Ready to buy</option></select>
+    </div>
+    <div class="f"><label>Follow-up timing</label>
+      <select id="fu-timing"><option value="">Select timing</option><option>Same day</option><option>Next day</option><option>3 days later</option><option>1 week later</option></select>
+    </div>
+    <div class="f"><label>Message tone</label>
+      <select id="fu-tone"><option value="">Select tone</option><option>Friendly</option><option>Professional</option><option>Urgent</option><option>Soft reminder</option><option>Premium consultant</option></select>
+    </div>
+  </div>
+  <button class="btn bd" id="fuBtn" onclick="generateFollowUp()">&#128172; Generate messages</button>
+  <div id="fu-results" style="display:none">
+    <div class="seg">Main WhatsApp Message</div>
+    <div class="msg-wrap"><div class="msg-head"><span class="msg-lbl">Main message</span><button class="cbtn" id="cp-main" onclick="copyMsg('fu-main','cp-main')">&#128203; Copy</button></div><div class="bub" id="fu-main"></div></div>
+    <div class="seg">Short Version</div>
+    <div class="msg-wrap"><div class="msg-head"><span class="msg-lbl">Shorter version</span><button class="cbtn" id="cp-short" onclick="copyMsg('fu-short','cp-short')">&#128203; Copy</button></div><div class="bub-blue" id="fu-short"></div></div>
+    <div class="seg">Stronger Closing Version</div>
+    <div class="msg-wrap"><div class="msg-head"><span class="msg-lbl">Closing version</span><button class="cbtn" id="cp-strong" onclick="copyMsg('fu-strong','cp-strong')">&#128203; Copy</button></div><div class="bub-amb" id="fu-strong"></div></div>
+    <div class="seg">Follow-up Strategy</div>
+    <div class="sec" style="padding:1rem" id="fu-strategy"></div>
+    <div class="seg">Best Time to Send</div>
+    <div class="sec" style="padding:1rem"><div style="font-size:13px;color:var(--text);line-height:1.6" id="fu-timing-out"></div></div>
+    <div class="seg">What NOT to Say</div>
+    <div class="wc" id="fu-donts"></div>
+  </div>
+</div>
+
+<!-- ================================================================
+     PAGE: FINANCE CALCULATOR
+================================================================ -->
+<div class="page" id="page-calc">
+  <div class="sec">
+    <div class="stitle">&#128663; Vehicle Details</div>
+    <div class="f"><label>Vehicle price (SGD)</label><input type="number" id="c-price" placeholder="e.g. 120000" oninput="autoLoan()"></div>
+    <div class="f"><label>Downpayment (SGD)</label><input type="number" id="c-dp" placeholder="e.g. 30000" oninput="autoLoan()"></div>
+    <div class="f"><label>Loan amount (SGD) <span class="ot">— auto-calculated</span></label><input type="number" id="c-loan" placeholder="Auto or enter manually" oninput="clearAutoLoan()"></div>
+  </div>
+  <div class="sec">
+    <div class="stitle">&#128200; Loan Terms</div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>Interest rate (% p.a.)</label><input type="number" id="c-rate" value="2.8" step="0.1"></div>
+      <div class="f" style="margin-bottom:0"><label>Tenure (years)</label><select id="c-tenure"><option>3</option><option>4</option><option>5</option><option>6</option><option selected>7</option></select></div>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="stitle">&#128295; Optional Extras</div>
+    <div class="f"><label>Balloon / residual value <span class="ot">optional</span></label><input type="number" id="c-balloon" placeholder="e.g. 10000"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>Processing fee <span class="ot">opt.</span></label><input type="number" id="c-fee" placeholder="e.g. 800"></div>
+      <div class="f" style="margin-bottom:0"><label>Insurance est. <span class="ot">opt.</span></label><input type="number" id="c-ins" placeholder="e.g. 2000"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Road tax / year <span class="ot">optional</span></label><input type="number" id="c-roadtax" placeholder="e.g. 700"></div>
+  </div>
+  <button class="btn bd" onclick="runCalc()">&#129518; Calculate</button>
+  <button class="bo" onclick="resetCalc()">Clear all fields</button>
+  <div id="calc-results" style="display:none">
+    <div class="ch"><div class="ch-lbl">Estimated monthly instalment</div><div class="ch-val" id="cr-monthly">SGD —</div><div class="ch-sub" id="cr-sub"></div></div>
+    <div class="cg">
+      <div class="cs2"><div class="cs2-l">Loan amount</div><div class="cs2-v" id="cr-loan"></div></div>
+      <div class="cs2"><div class="cs2-l">Total interest</div><div class="cs2-v" id="cr-interest"></div></div>
+      <div class="cs2"><div class="cs2-l">Total repayment</div><div class="cs2-v" id="cr-total"></div></div>
+      <div class="cs2"><div class="cs2-l">Upfront cash</div><div class="cs2-v" id="cr-upfront"></div><div class="cs2-s" id="cr-upfront-sub"></div></div>
+    </div>
+    <div class="ib blue" id="cr-friendly"></div>
+    <div class="seg">Scenario Comparison</div>
+    <div class="scg" id="cr-scenarios"></div>
+    <div class="disc"><span style="font-size:14px;flex-shrink:0">&#8505;&#65039;</span><p>Estimates only. Final approval and rates depend on the finance company, customer profile, and dealership terms. Always confirm with your finance manager.</p></div>
+  </div>
+</div>
+
+<!-- ================================================================
+     PAGE: COMPETITOR COMPARISON ENGINE
+================================================================ -->
+<div class="page" id="page-compare">
+
+  <!-- Our car -->
+  <div class="cpanel ours">
+    <div class="cpt ours">&#9989; Our Car</div>
+    <div class="f"><label>Make / Model</label><input type="text" id="o-model" placeholder="e.g. Toyota Camry 2.5 Hybrid"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>Year</label><input type="number" id="o-year" placeholder="2022"></div>
+      <div class="f" style="margin-bottom:0"><label>Price (SGD)</label><input type="number" id="o-price" placeholder="118000"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Mileage (km)</label><input type="number" id="o-mileage" placeholder="28000"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>COE expiry</label><input type="text" id="o-coe" placeholder="Mar 2032"></div>
+      <div class="f" style="margin-bottom:0"><label>No. of owners</label><input type="number" id="o-owners" placeholder="1"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Warranty</label><input type="text" id="o-warranty" placeholder="3-year manufacturer"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>Road tax / yr (SGD)</label><input type="number" id="o-roadtax" placeholder="742"></div>
+      <div class="f" style="margin-bottom:0"><label>Depreciation / yr (SGD)</label><input type="number" id="o-depr" placeholder="8500"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Extras / Notes</label><textarea id="o-notes" placeholder="e.g. Free tinting, 1-yr insurance, full service records"></textarea></div>
+  </div>
+
+  <!-- Competitor car -->
+  <div class="cpanel them">
+    <div class="cpt them">&#9888;&#65039; Competitor Car</div>
+    <div class="f"><label>Make / Model</label><input type="text" id="c2-model" placeholder="e.g. Honda Accord 1.5T"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>Year</label><input type="number" id="c2-year" placeholder="2021"></div>
+      <div class="f" style="margin-bottom:0"><label>Price (SGD)</label><input type="number" id="c2-price" placeholder="115000"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Mileage (km)</label><input type="number" id="c2-mileage" placeholder="45000"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>COE expiry</label><input type="text" id="c2-coe" placeholder="Jun 2030"></div>
+      <div class="f" style="margin-bottom:0"><label>No. of owners</label><input type="number" id="c2-owners" placeholder="2"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Warranty</label><input type="text" id="c2-warranty" placeholder="1-year dealer warranty"></div>
+    <div class="r2">
+      <div class="f" style="margin-bottom:0"><label>Road tax / yr (SGD)</label><input type="number" id="c2-roadtax" placeholder="742"></div>
+      <div class="f" style="margin-bottom:0"><label>Depreciation / yr (SGD)</label><input type="number" id="c2-depr" placeholder="10200"></div>
+    </div>
+    <div class="f" style="margin-top:.625rem"><label>Risks / Notes</label><textarea id="c2-notes" placeholder="e.g. No service records, accident history unknown"></textarea></div>
+  </div>
+
+  <button class="btn bd" id="cmpBtn" onclick="runCompare()">&#9878;&#65039; Compare offers</button>
+
+  <!-- Results -->
+  <div id="cmp-results" style="display:none">
+    <div class="seg">Score Summary</div>
+    <div class="score-row" id="cmp-score-row"></div>
+
+    <div class="seg">Head-to-Head Comparison</div>
+    <div class="sec" style="padding:.875rem 1rem">
+      <div class="chdr">
+        <div class="cion"></div>
+        <div class="clbl">Category</div>
+        <div class="cov">Ours</div>
+        <div class="ctv">Theirs</div>
+        <div class="cwin">Win</div>
+      </div>
+      <div id="cmp-table"></div>
+    </div>
+
+    <div class="seg">Overall Value Winner</div>
+    <div class="oc" id="cmp-overall">
+      <div class="oc-lbl" id="cmp-overall-lbl">Overall winner</div>
+      <div class="oc-w" id="cmp-overall-winner"></div>
+      <div class="oc-r" id="cmp-overall-reason"></div>
+    </div>
+
+    <div class="seg">&#9989; Sales Talking Points</div>
+    <div id="cmp-talking"></div>
+
+    <div class="seg">&#9888;&#65039; Risk Areas to Address</div>
+    <div id="cmp-risks"></div>
+
+    <div class="seg">If customer says "another dealer is cheaper"</div>
+    <div class="cbox"><p id="cmp-cheaper"></p></div>
+
+    <div class="seg">WhatsApp Comparison Message</div>
+    <div class="msg-wrap">
+      <div class="msg-head"><span class="msg-lbl">Ready to send</span><button class="cbtn" id="cp-cmp" onclick="copyMsg('cmp-wa','cp-cmp')">&#128203; Copy</button></div>
+      <div class="bub" id="cmp-wa"></div>
+    </div>
+
+    <div class="disc"><span style="font-size:14px;flex-shrink:0">&#8505;&#65039;</span><p>Comparison is based only on entered data. Verify all details before advising customers. Prices, COE, depreciation and mileage should be confirmed from official sources.</p></div>
+  </div>
+</div>
+
+<!-- ================================================================
+     PAGE: VEHICLE MATCH ENGINE
+================================================================ -->
+<div class="page" id="page-match">
+
+  <!-- Customer Profile Inputs -->
+  <div class="sec">
+    <div class="stitle">&#127775; Customer Profile</div>
+
+    <div class="f"><label>Total budget (SGD)</label>
+      <input type="number" id="vm-budget" placeholder="e.g. 120000">
+    </div>
+
+    <div class="f"><label>Vehicle type preference</label>
+      <div class="vm-chip-group" id="vm-type-chips">
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Sedan')">Sedan</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','SUV')">SUV</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Hatchback')">Hatchback</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','MPV')">MPV</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Sports')">Sports</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Luxury')">Luxury</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Any')">Any / Open</button>
+      </div>
+    </div>
+
+    <div class="f"><label>What matters most? (choose up to 3)</label>
+      <div class="vm-chip-group" id="vm-pref-chips">
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Brand')">Brand</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Fuel Economy')">Fuel Economy</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Performance')">Performance</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Family')">Family</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Reliability')">Reliability</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Low Depreciation')">Low Depreciation</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Technology')">Technology</button>
+        <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Safety')">Safety</button>
+      </div>
+    </div>
+
+    <div class="f"><label>New or used?</label>
+      <div class="vm-chip-group" id="vm-condition-chips">
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-condition','New')">New</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-condition','Used')">Used</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-condition','Open to Both')">Open to Both</button>
+      </div>
+    </div>
+
+    <div class="f"><label>Family size</label>
+      <div class="vm-chip-group" id="vm-family-chips">
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-family','1')">1</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-family','2')">2</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-family','3')">3</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-family','4')">4</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-family','5+')">5+</button>
+      </div>
+    </div>
+
+    <div class="f"><label>Daily driving distance</label>
+      <div class="vm-chip-group" id="vm-driving-chips">
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-driving','Short')">Short (under 30km)</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-driving','Medium')">Medium (30–80km)</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-driving','Long')">Long (80km+)</button>
+      </div>
+    </div>
+
+    <div class="f"><label>Top priority</label>
+      <div class="vm-chip-group" id="vm-priority-chips">
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Lowest Monthly Payment')">Lowest Monthly</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Lowest Depreciation')">Lowest Depreciation</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Best Value')">Best Value</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Luxury')">Luxury</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Performance')">Performance</button>
+        <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Reliability')">Reliability</button>
+      </div>
+    </div>
+
+    <div class="f"><label>Specific model in mind? <span class="ot">optional — for alternatives</span></label>
+      <input type="text" id="vm-specific" placeholder="e.g. Honda Vezel">
+    </div>
+  </div>
+
+  <button class="btn bd" id="vm-btn" onclick="runVehicleMatch()">&#127775; Find best match</button>
+
+  <!-- Results -->
+  <div id="vm-results" style="display:none">
+
+    <!-- Alternatives (shown if specific model entered) -->
+    <div id="vm-alt-section" style="display:none">
+      <div class="seg">Similar alternatives to <span id="vm-alt-model-name"></span></div>
+      <div id="vm-alt-list"></div>
+    </div>
+
+    <!-- Top 5 Recommendations -->
+    <div class="seg">&#127775; Top 5 recommended vehicles</div>
+    <div id="vm-cards"></div>
+
+    <!-- Sales Talking Points for this customer -->
+    <div class="seg">&#128172; Sales talking points for this customer</div>
+    <div class="sec" style="padding:1rem">
+      <ul class="vm-tp-list" id="vm-talking-points"></ul>
+    </div>
+
+    <button class="btn bg" id="vm-save-btn" onclick="saveVmMatch()">&#128190; Save match</button>
+  </div>
+
+  <!-- Match History -->
+  <div class="seg">Match history</div>
+  <div class="sb">
+    <span class="sb-ic">&#128269;</span>
+    <input type="text" id="vm-hist-search" placeholder="Search by profile or car…" oninput="renderVmHistory()">
+  </div>
+  <div id="vm-hist-list"></div>
+
+</div><!-- /page-match -->
+
+<!-- ================================================================
+     PAGE: OBJECTION BRAIN
+================================================================ -->
+<div class="page" id="page-objection">
+
+  <!-- Input section -->
+  <div class="sec">
+    <div class="stitle">&#129504; Objection Brain</div>
+    <div class="f"><label>Type customer objection</label>
+      <input type="text" id="ob-input" placeholder='e.g. "I need to think about it"' oninput="ob_clearChip()">
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:.625rem;font-weight:600">OR tap a quick objection:</div>
+    <div class="ob-chips" id="ob-chips">
+      <button class="ob-chip" onclick="ob_selectChip(this,'Too expensive')">Too expensive</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Need to think')">Need to think</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Need wife\'s approval')">Need wife's approval</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Comparing other dealers')">Comparing dealers</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Monthly instalment too high')">Instalment too high</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Trade-in too low')">Trade-in too low</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Loan rejected')">Loan rejected</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Wants better warranty')">Wants better warranty</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Found cheaper elsewhere')">Found cheaper elsewhere</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Not ready yet')">Not ready yet</button>
+      <button class="ob-chip" onclick="ob_selectChip(this,'Other')">Other</button>
+    </div>
+  </div>
+
+  <button class="btn bd" id="ob-btn" onclick="analyzeObjection()">&#129504; Analyze objection</button>
+
+  <!-- Results (hidden until analyzed) -->
+  <div id="ob-results" style="display:none">
+
+    <div class="seg">1. Real Objection</div>
+    <div class="ob-real-card" id="ob-real-card">
+      <div class="ob-real-title">What the customer is REALLY worried about</div>
+      <div id="ob-real-list"></div>
+    </div>
+
+    <div class="seg">2. Psychology</div>
+    <div class="ob-psych" id="ob-psych">
+      <div class="ob-psych-title">&#129504; Why customers say this</div>
+      <p id="ob-psych-text"></p>
+    </div>
+
+    <div class="seg">3. Next Best Question</div>
+    <div class="ob-q-card">
+      <div class="ob-q-label">Ask this immediately</div>
+      <div class="ob-q-text" id="ob-question"></div>
+    </div>
+
+    <div class="seg">4. What NOT to Say</div>
+    <div class="ob-dont-card" id="ob-donts"></div>
+
+    <div class="seg">5. Recommended Strategy</div>
+    <div class="ob-strat-card" id="ob-strategy"></div>
+
+    <div class="seg">6. Closing Chance</div>
+    <div class="ob-close-wrap">
+      <div class="ob-close-label">Probability of closing after handling this objection</div>
+      <div class="ob-close-pct" id="ob-close-pct">0%</div>
+      <div class="ob-close-bar-bg"><div class="ob-close-bar" id="ob-close-bar" style="width:0%"></div></div>
+      <div class="ob-close-note" id="ob-close-note"></div>
+    </div>
+
+    <button class="btn bg" id="ob-save-btn" onclick="saveToObjLibrary()">&#128190; Save to Objection Library</button>
+  </div>
+
+  <!-- Objection Library -->
+  <div class="seg">Objection Library</div>
+  <div class="sb">
+    <span class="sb-ic">&#128269;</span>
+    <input type="text" id="obl-search" placeholder="Search saved objections…" oninput="renderObjLibrary()">
+  </div>
+  <div id="obl-list"></div>
+
+</div><!-- /page-objection -->
+
+<!-- ================================================================
+     PAGE: APEX MEMORY ENGINE
+================================================================ -->
+<div class="page" id="page-memory">
+
+  <!-- Empty state shown when no data -->
+  <div class="mem-empty" id="mem-empty-state">
+    <div style="font-size:48px">&#129504;</div>
+    <p>Apex Memory is empty.<br>Complete deals in the Deal Coach and Live Copilot<br>to build your learning database.</p>
+  </div>
+
+  <!-- Dashboard (shown when data exists) -->
+  <div id="mem-dashboard" style="display:none">
+
+    <!-- KPI grid -->
+    <div class="seg">Deal performance</div>
+    <div class="mem-kpi-grid">
+      <div class="mem-kpi accent"><div class="mem-kpi-val" id="mem-total">0</div><div class="mem-kpi-lbl">Total deals</div></div>
+      <div class="mem-kpi green"><div class="mem-kpi-val" id="mem-won">0</div><div class="mem-kpi-lbl">Won</div></div>
+      <div class="mem-kpi red"><div class="mem-kpi-val" id="mem-lost">0</div><div class="mem-kpi-lbl">Lost</div></div>
+      <div class="mem-kpi blue"><div class="mem-kpi-val" id="mem-rate">0%</div><div class="mem-kpi-lbl">Close rate</div></div>
+    </div>
+
+    <!-- Wide KPIs -->
+    <div class="seg">Patterns</div>
+    <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common objection</span><span class="mem-wide-val" id="mem-top-obj">—</span></div>
+    <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most recommended vehicle</span><span class="mem-wide-val" id="mem-top-car">—</span></div>
+    <div class="mem-wide-kpi"><span class="mem-wide-lbl">Average customer budget</span><span class="mem-wide-val" id="mem-avg-budget">—</span></div>
+    <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common buyer type</span><span class="mem-wide-val" id="mem-top-type">—</span></div>
+    <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common buying stage</span><span class="mem-wide-val" id="mem-top-stage">—</span></div>
+    <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common trust level</span><span class="mem-wide-val" id="mem-top-trust">—</span></div>
+
+    <!-- AI Insights -->
+    <div class="seg">&#129504; AI insights</div>
+    <div id="mem-insights"></div>
+
+    <!-- Success strategies -->
+    <div class="seg">&#127942; Top performing strategies</div>
+    <div id="mem-strategies"></div>
+
+    <!-- Similar customer lookup (live) -->
+    <div class="seg">&#128269; Similar customer lookup</div>
+    <div class="sec" style="padding:1rem">
+      <div class="f"><label>Paste objection or customer note</label>
+        <input type="text" id="mem-lookup-input" placeholder="e.g. monthly too high, wife not sure…" oninput="mem_lookup()">
+      </div>
+      <div id="mem-lookup-result" style="margin-top:.75rem"></div>
+    </div>
+
+    <!-- Export / Import / Reset -->
+    <div class="seg">Data</div>
+    <div class="mem-action-row">
+      <button class="mem-action-btn" onclick="mem_export()">&#8595; Export JSON</button>
+      <button class="mem-action-btn" onclick="el('mem-import-file').click()">&#8593; Import JSON</button>
+      <input type="file" id="mem-import-file" accept=".json" style="display:none" onchange="mem_import(this)">
+    </div>
+    <button class="mem-action-btn danger" style="width:100%;margin-bottom:.875rem" onclick="mem_reset()">&#128465; Clear Apex Memory</button>
+
+  </div><!-- /mem-dashboard -->
+
+</div><!-- /page-memory -->
+
+<!-- ================================================================
+     PAGE: CUSTOMER HISTORY
+================================================================ -->
+<div class="page" id="page-history">
+  <div id="hv-list">
+    <div id="stats-row" class="str" style="display:none">
+      <div class="stc"><div class="stv" id="stat-total">0</div><div class="stl">Saved</div></div>
+      <div class="stc"><div class="stv" id="stat-week">0</div><div class="stl">This week</div></div>
+      <div class="stc"><div class="stv" id="stat-high">0</div><div class="stl">High risk</div></div>
+    </div>
+    <div class="sb">
+      <span class="sb-ic">&#128269;</span>
+      <input type="text" id="search-input" placeholder="Search name, car or objection…" oninput="renderHistory()">
+    </div>
+    <div id="history-list"></div>
+  </div>
+  <div id="hv-detail" style="display:none">
+    <button class="bbtn" onclick="backToList()">&#8592; All customers</button>
+    <div id="detail-wrap"></div>
+  </div>
+</div>
+
+<!-- ================================================================
+     PAGE: LIVE SALES COPILOT
+================================================================ -->
+<div class="page" id="page-copilot">
+
+  <!-- START SCREEN -->
+  <div class="cp-start-screen" id="cp-start">
+    <div class="cp-start-icon">&#9654;&#65039;</div>
+    <div class="cp-start-title">Live Sales Copilot</div>
+    <div class="cp-start-desc">Real-time AI coaching while you talk to your customer. Keep your phone in hand and type as you go.</div>
+    <button class="cp-start-btn" onclick="cp_startDeal()">
+      <span style="font-size:20px">&#9654;</span> Start live deal
+    </button>
+    <div style="margin-top:1.25rem;font-size:12px;color:var(--muted)">Your notes stay private on this device.</div>
+    <button onclick="cp_testAPI()" style="margin-top:.875rem;background:none;border:1px solid var(--bd);border-radius:9px;padding:8px 16px;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit">&#128312; Test API connection</button>
+    <div id="cp-api-test-result" style="margin-top:.625rem;font-size:12px;text-align:center"></div>
+  </div>
+
+  <!-- LIVE SCREEN -->
+  <div class="cp-live-screen" id="cp-live">
+
+    <!-- Header with timer -->
+    <div class="cp-live-header">
+      <div class="cp-live-title">&#128308; Live — deal in progress</div>
+      <div class="cp-timer" id="cp-timer">00:00</div>
+    </div>
+
+    <!-- Status Row -->
+    <div class="cp-status-row">
+      <div class="cp-stat">
+        <div class="cp-stat-icon" id="cp-mood-icon">&#128528;</div>
+        <div class="cp-stat-val" id="cp-mood-val">–</div>
+        <div class="cp-stat-lbl">Mood</div>
+      </div>
+      <div class="cp-stat">
+        <div class="cp-stat-icon">&#127919;</div>
+        <div class="cp-stat-val" id="cp-intent-val">–</div>
+        <div class="cp-stat-lbl">Intent</div>
+      </div>
+      <div class="cp-stat">
+        <div class="cp-stat-icon">&#129309;</div>
+        <div class="cp-stat-val" id="cp-trust-val">–</div>
+        <div class="cp-stat-lbl">Trust</div>
+      </div>
+      <div class="cp-stat">
+        <div class="cp-stat-icon">&#9888;&#65039;</div>
+        <div class="cp-stat-val" id="cp-risk-val">–</div>
+        <div class="cp-stat-lbl">Risk</div>
+      </div>
+    </div>
+
+    <!-- Buying intent bar -->
+    <div class="cp-intent-bar" id="cp-intent-bar" style="display:none">
+      <div class="cp-intent-row">
+        <span class="cp-intent-lbl">Buying intent</span>
+        <span class="cp-intent-val" id="cp-intent-pct">0%</span>
+      </div>
+      <div class="cp-intent-bg"><div class="cp-intent-fill" id="cp-intent-fill" style="width:0%"></div></div>
+    </div>
+
+    <!-- Emotion tags -->
+    <div class="cp-emotion-wrap" id="cp-emotion-wrap" style="display:none"></div>
+
+    <!-- Live coaching panel -->
+    <div class="cp-coaching" id="cp-coaching" style="display:none">
+      <div class="cp-coaching-row say">
+        <div class="cp-coaching-icon">&#128161;</div>
+        <div><div class="cp-coaching-label">Say this next</div><div class="cp-coaching-text" id="cp-say"></div></div>
+      </div>
+      <div class="cp-coaching-row warn">
+        <div class="cp-coaching-icon">&#9888;&#65039;</div>
+        <div><div class="cp-coaching-label">Avoid saying</div><div class="cp-coaching-text" id="cp-warn"></div></div>
+      </div>
+      <div class="cp-coaching-row action">
+        <div class="cp-coaching-icon">&#9654;&#65039;</div>
+        <div><div class="cp-coaching-label">Next action</div><div class="cp-coaching-text" id="cp-action"></div></div>
+      </div>
+    </div>
+
+    <!-- Best Next Question (Constitution principle 3 & 7) -->
+    <div class="cp-coaching" id="cp-question-card" style="display:none;margin-top:.625rem;border-color:var(--bbd)">
+      <div class="cp-coaching-row" style="background:var(--bbg)">
+        <div class="cp-coaching-icon">&#10067;</div>
+        <div style="flex:1">
+          <div class="cp-coaching-label" style="color:var(--blue)">Best next question</div>
+          <div class="cp-coaching-text" id="cp-best-question" style="color:var(--blue)"></div>
+          <div style="font-size:11px;color:var(--blue);opacity:.7;margin-top:5px;line-height:1.4" id="cp-why-question"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Conversation Stage badge -->
+    <div id="cp-stage-wrap" style="display:none;margin-top:.625rem;margin-bottom:.25rem">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Conversation stage&#8194;</span>
+      <span id="cp-stage-badge" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--s2);color:var(--text)"></span>
+    </div>
+
+    <!-- Notes input -->
+    <div class="seg" style="margin-top:.25rem">Your live notes</div>
+    <textarea class="cp-notes" id="cp-notes" placeholder="Type as you talk&#10;&#10;e.g.&#10;Customer says monthly too high&#10;Likes Toyota&#10;Wife prefers SUV&#10;Has Honda Fit trade-in"></textarea>
+    <button class="cp-update-btn" id="cp-update-btn" onclick="cp_update()">
+      &#129504; Update — analyze notes
+    </button>
+
+    <!-- End deal -->
+    <button class="cp-end-btn" onclick="cp_showOutcome()">&#9632; Finish deal</button>
+
+    <!-- Outcome sheet -->
+    <div class="cp-outcome-sheet" id="cp-outcome-sheet">
+      <div class="cp-outcome-title">How did it go?</div>
+      <div class="cp-outcome-btns">
+        <button class="cp-outcome-btn won"    onclick="cp_endDeal('won')">&#127881; Won</button>
+        <button class="cp-outcome-btn lost"   onclick="cp_endDeal('lost')">&#128577; Lost</button>
+        <button class="cp-outcome-btn think"  onclick="cp_endDeal('think')">&#129300; Still thinking</button>
+        <button class="cp-outcome-btn cancel" onclick="cp_endDeal('cancel')">&#10006; Cancelled</button>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="cp-timeline" id="cp-timeline">
+      <div class="cp-tl-title">&#128336; Deal timeline</div>
+      <div id="cp-tl-items"></div>
+      <button class="btn bd" style="margin-top:.875rem;margin-bottom:0" onclick="cp_backToStart()">&#43; Start new deal</button>
+    </div>
+
+  </div><!-- /cp-live -->
+
+  <!-- Deal History -->
+  <div class="seg" id="cp-hist-seg">Live deal history</div>
+  <div class="sb">
+    <span class="sb-ic">&#128269;</span>
+    <input type="text" id="cp-hist-search" placeholder="Search deals…" oninput="cp_renderHistory()">
+  </div>
+  <div id="cp-hist-list"></div>
+
+</div><!-- /page-copilot -->
+
+<!-- Replay Modal -->
+<div class="cp-replay" id="cp-replay">
+  <div class="cp-replay-inner">
+    <button class="cp-replay-close" onclick="cp_closeReplay()">&#10005;</button>
+    <div id="cp-replay-content"></div>
+  </div>
+</div>
+
+</div><!-- .app -->
+<script src="/js/app.js"></script>
+</body>
+</html>
