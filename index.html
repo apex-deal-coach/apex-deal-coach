@@ -965,6 +965,8 @@ textarea{resize:vertical;min-height:58px}
       <span style="font-size:20px">&#9654;</span> Start live deal
     </button>
     <div style="margin-top:1.25rem;font-size:12px;color:var(--muted)">Your notes stay private on this device.</div>
+    <button onclick="cp_testAPI()" style="margin-top:.875rem;background:none;border:1px solid var(--bd);border-radius:9px;padding:8px 16px;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit">&#128312; Test API connection</button>
+    <div id="cp-api-test-result" style="margin-top:.625rem;font-size:12px;text-align:center"></div>
   </div>
 
   <!-- LIVE SCREEN -->
@@ -1349,54 +1351,35 @@ function analyze() {
   const btn = el('analyzeBtn');
   btn.innerHTML = '<div class="spinner"></div> Analyzing...';
   btn.classList.add('loading');
-  setTimeout(() => {
-    const r = motAnalyze(d), prof = buildProfile(d);
-    const concerns = buildConcerns(d), questions = buildQuestions(d);
-    const warnings = buildWarnings(d), strategy = buildStrategy(d);
 
-    el('p-type').textContent = prof.type; el('p-type-icon').textContent = prof.typeIcon;
-    el('p-stage').textContent = prof.stage; el('p-stage-icon').textContent = prof.stageIcon;
-    el('p-trust').textContent = prof.trust; el('p-trust-icon').textContent = prof.trustIcon;
-    el('p-urgency').textContent = prof.urgency;
-    el('p-prob').textContent = prof.prob + '%';
-    el('p-prob-bar').style.width = prof.prob + '%';
-    el('p-prob-bar').style.background = prof.probColor;
+  // ── Try GPT first, fall back to local logic ──
+  apexAI('coach', d).then(gptResult => {
+    let r, prof, concerns, questions, warnings, strategy;
+    const usedFallback = !gptResult || gptResult.fallback;
 
-    el('concerns-wrap').innerHTML = concerns.map(c =>
-      `<div class="cc"><div class="cdot" style="background:${c.dot}"></div><div><div class="ct">${c.text}</div><div class="cs">${c.sub}</div></div></div>`
-    ).join('');
-    el('questions-wrap').innerHTML = questions.map((q, i) =>
-      `<div class="qc"><div class="qn">${i+1}</div><div class="qt">${q}</div></div>`
-    ).join('');
-    el('warnings-wrap').innerHTML = warnings.map(w =>
-      `<div class="wc"><div class="wh">⚠️ Warning</div><div class="wm">${w.main}</div><div class="wr">Reason: ${w.why}</div></div>`
-    ).join('');
-    el('strategy-wrap').innerHTML = strategy.map((s, i) =>
-      `<div class="sc"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`
-    ).join('');
+    if (gptResult && !gptResult.fallback) {
+      // ── GPT path ──
+      prof      = gptResult.profile   || buildProfile(d);
+      concerns  = gptResult.concerns  || buildConcerns(d);
+      questions = gptResult.questions || buildQuestions(d);
+      warnings  = gptResult.warnings  || buildWarnings(d);
+      strategy  = gptResult.strategy  || buildStrategy(d);
+      r         = { concern: gptResult.concern||'', resp: gptResult.resp||'', trust: gptResult.trust||[], discount: gptResult.discount||'', finance: gptResult.finance||'', risk: gptResult.risk||'Medium', riskReason: gptResult.riskReason||'', whatsapp: gptResult.whatsapp||'' };
+      r.concerns = concerns; r.questions = questions; r.warnings = warnings; r.strategy = strategy;
+    } else {
+      // ── Local fallback ──
+      r = motAnalyze(d); prof = buildProfile(d);
+      concerns = buildConcerns(d); questions = buildQuestions(d);
+      warnings = buildWarnings(d); strategy = buildStrategy(d);
+      r.concerns = concerns; r.questions = questions; r.warnings = warnings; r.strategy = strategy;
+      if (usedFallback && gptResult && gptResult.error) {
+        apexShowError('report', gptResult.error, true);
+      }
+    }
 
-    const fn = (d.name || '').split(' ')[0] || 'there';
-    el('coach-wa').textContent = `Hi ${fn}! Great chatting today about the ${d.car || 'car'}. 🚗\n\nI've prepared a personalised breakdown based on your preferred monthly instalment — happy to walk you through it anytime.\n\nI can also hold a test drive slot this weekend — units move quickly. Just drop me a message! 😊\n\n– [Your name]`;
+    renderCoachResult(r, prof, d);
 
-    el('r-profile').innerHTML = [
-      pill('Name', d.name), pill('Motivation', d.motivation), pill('Car', d.car),
-      pill('Budget',      d.budget  ? sgd(parseInt(d.budget))  : ''),
-      pill('Downpayment', d.dp     ? sgd(parseInt(d.dp))      : ''),
-      pill('Monthly',     d.monthly ? sgd(parseInt(d.monthly)) + '/mo' : ''),
-      pill('Tenure', d.tenure), pill('Trade-in', d.tradein),
-      pill('Timeline', d.timeline), pill('Viewed', d.showrooms)
-    ].join('');
-
-    el('r-concern').textContent = r.concern;
-    el('r-response').textContent = r.resp;
-    el('r-discount').textContent = r.discount;
-    el('r-finance').textContent = r.finance;
-    el('r-trust').innerHTML = r.trust.map(t => `<li>${t}</li>`).join('');
-    const rc = r.risk === 'High' ? 'rh' : r.risk === 'Medium' ? 'rm' : 'rl';
-    el('r-risk').innerHTML = `<span class="rbadge ${rc}">${r.risk} risk</span>`;
-    el('r-risk-reason').textContent = r.riskReason;
-
-    _lastInput = d;
+    _lastInput  = d;
     _lastResult = { ...r, profile: prof, concerns, questions, warnings, strategy };
     const sb = el('saveBtn');
     sb.innerHTML = '&#128190; Save customer'; sb.classList.remove('saved'); sb.disabled = false;
@@ -1404,7 +1387,7 @@ function analyze() {
     btn.innerHTML = '&#129504; Analyze deal'; btn.classList.remove('loading');
     el('report').style.display = '';
     el('report').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 1400);
+  });
 }
 
 function saveCustomer() {
@@ -1422,113 +1405,57 @@ function saveCustomer() {
 // ════════════════════════════════════════════════════════════════
 
 function generateFollowUp() {
-  const name  = gv('fu-name') || 'the customer';
-  const fn    = name.replace(/^(mr|mrs|ms|dr)\.?\s*/i, '').split(' ')[0] || 'there';
-  const car   = gv('fu-car') || 'the car';
-  const obj   = gv('fu-obj');
-  const status   = gv('fu-status')      || 'New lead';
-  const timing   = gv('fu-timing')      || 'Next day';
-  const tone     = gv('fu-tone')        || 'Friendly';
-  const interact = gv('fu-interaction') || 'visit';
+  const name    = gv('fu-name') || 'the customer';
+  const fn      = name.replace(/^(mr|mrs|ms|dr)\.\s*/i, '').split(' ')[0] || 'there';
+  const car     = gv('fu-car') || 'the car';
+  const obj     = gv('fu-obj');
+  const status  = gv('fu-status')      || 'New lead';
+  const timing  = gv('fu-timing')      || 'Next day';
+  const tone    = gv('fu-tone')        || 'Friendly';
+  const interact= gv('fu-interaction') || 'visit';
 
   const btn = el('fuBtn');
   btn.innerHTML = '<div class="spinner"></div> Generating...'; btn.classList.add('loading');
 
-  setTimeout(() => {
-    const greet = { Friendly: `Hi ${fn}! 😊`, Professional: `Hi ${fn},`, Urgent: `Hi ${fn}! ⚡`, 'Soft reminder': `Hi ${fn} 👋`, 'Premium consultant': `Good day, ${fn}.` }[tone] || `Hi ${fn}!`;
+  const input = { name, firstName: fn, car, objection: obj, status, timing, tone, lastInteraction: interact };
 
-    const context = {
-      'Walk-in':        `It was great having you visit our showroom earlier`,
-      'Test drive':     `Thank you for coming down for the test drive today — hope you enjoyed the feel of the ${car}`,
-      'Phone call':     `Thanks for taking the time to chat with me earlier`,
-      'WhatsApp':       `Thanks for reaching out and chatting with me about the ${car}`,
-      'Viewing':        `Thank you for viewing the ${car} with us earlier`,
-      'Quotation sent': `Thank you for your time — I've sent over the quotation for the ${car} as discussed`
-    }[interact] || `Thank you for connecting with me about the ${car}`;
-
-    const middle = {
-      'New lead':                `I wanted to share a bit more about the ${car} — it's been very popular with customers who have similar needs to yours. Happy to arrange a private viewing or test drive at a time that suits you.`,
-      'Comparing':               `I understand you're looking at a few options — that's completely fine. I'd love the chance to show you what makes the ${car} stand out, and walk you through the numbers side by side. No pressure at all.`,
-      'Negotiating':             `I've checked with my manager on the numbers we discussed. I believe we can work something out that's comfortable for you. Can we find 15 minutes to go through it together?`,
-      'Waiting for spouse':      `If it helps, I'd be happy to arrange a session for both of you to come in together — that way I can address any questions your partner might have directly. Weekends work well for families.`,
-      'Waiting for loan approval': `I'll keep this unit on your behalf while the loan comes through. If there's any paperwork or information needed from my side, just let me know.`,
-      'Ghosted':                 `I know you're probably busy, so I'll keep this short — I just wanted to check in on the ${car} and see if you have any questions. No pressure either way.`,
-      'Ready to buy':            `I'm ready on my side — just need your confirmation to lock in the unit, colour and delivery date. Shall we get this done? 😊`
-    }[status] || `I wanted to follow up and see if there's anything I can help clarify about the ${car}.`;
-
-    let objLine = '';
-    if (obj) {
-      const ol = obj.toLowerCase();
-      if (ol.includes('price') || ol.includes('expensive'))
-        objLine = `\n\nRegarding the price — I've looked into a few options that might bring the monthly instalment to a more comfortable range for you. Happy to share the breakdown.`;
-      else if (ol.includes('wife') || ol.includes('spouse') || ol.includes('husband'))
-        objLine = `\n\nI completely understand — a big purchase like this is a family decision. I'd love to invite both of you in together so I can answer any questions directly.`;
-      else if (ol.includes('think') || ol.includes('consider'))
-        objLine = `\n\nTake all the time you need — I just wanted to make sure you have everything you need to make the right call.`;
-      else if (ol.includes('loan') || ol.includes('finance'))
-        objLine = `\n\nI can also help explore different financing options — sometimes there's a structure that works much better than the first numbers suggest.`;
-      else
-        objLine = `\n\nI also wanted to follow up on the concern you mentioned — happy to go through it properly whenever you're ready.`;
+  apexAI('followup', input).then(gpt => {
+    // ── Apply result (GPT or local fallback) ──
+    function applyLocal() {
+      const greet = { Friendly: `Hi ${fn}! 😊`, Professional: `Hi ${fn},`, Urgent: `Hi ${fn}! ⚡`, 'Soft reminder': `Hi ${fn} 👋`, 'Premium consultant': `Good day, ${fn}.` }[tone] || `Hi ${fn}!`;
+      const ctx   = { 'Walk-in': `It was great having you visit our showroom earlier`, 'Test drive': `Thank you for coming down for the test drive today — hope you enjoyed the feel of the ${car}`, 'Phone call': `Thanks for taking the time to chat with me earlier`, 'WhatsApp': `Thanks for reaching out about the ${car}`, 'Viewing': `Thank you for viewing the ${car} with us`, 'Quotation sent': `Thank you — I\'ve sent over the quotation for the ${car}` }[interact] || `Thank you for connecting with me about the ${car}`;
+      const closing = { Friendly: `Looking forward to hearing from you! 😊`, Professional: `Please feel free to reach out at your convenience.`, Urgent: `Units are moving fast — just say the word. ⚡`, 'Soft reminder': `No rush — just here whenever you\'re ready. 🙂`, 'Premium consultant': `I\'ll ensure the experience is seamless. Do let me know how you\'d like to proceed.` }[tone] || `Looking forward to hearing from you!`;
+      let objLine = '';
+      if (obj) { const ol = obj.toLowerCase(); if (ol.includes('price')||ol.includes('expensive')) objLine = `\n\nRegarding the price — I\'ve looked into options that might bring the monthly instalment to a more comfortable range.`; else if (ol.includes('wife')||ol.includes('spouse')) objLine = `\n\nI completely understand — this is a family decision. I\'d love to invite both of you in together.`; else objLine = `\n\nI also wanted to follow up on the concern you mentioned — happy to go through it whenever you\'re ready.`; }
+      el('fu-main').textContent   = `${greet}\n\n${ctx}.\n\n${status === 'Ghosted' ? `I know you\'re probably busy — just a quick check-in on the ${car}. No pressure either way.` : status === 'Ready to buy' ? `I\'m ready on my side — just need your confirmation to lock in the unit. Shall we get this done? 😊` : `I wanted to share a bit more about the ${car} and see if I can answer any questions.`}${objLine}\n\n${closing}\n\n– [Your name] | [Dealership]`;
+      el('fu-short').textContent  = `${greet} Just checking in on the ${car} — any questions I can help with? ${tone === 'Urgent' ? 'Units moving fast! ⚡' : 'Happy to assist anytime. 😊'}\n\n– [Your name]`;
+      el('fu-strong').textContent = `${greet}\n\nI\'ll be upfront — I\'d really like to help you drive home in the ${car}, and I\'ll do my best to make the numbers work.\n\nWhat would it take for you to say yes? Tell me and I\'ll do my best.\n\n– [Your name]`;
+      const stepsMap = { 'Ghosted': ['Send the short version first — no pressure.','Wait 2 days. If no reply, send the strong closing version.','After 5 days, send a final message and give them an easy out.'], 'Comparing': ['Send the main message today to stay top of mind.','Offer a specific differentiator — not just a price drop.','Follow up in 3 days if no reply, then weekly.'], 'Ready to buy': ['Send within the hour — strike while intent is hot.','Confirm unit, colour, and delivery date in the same message.','Follow up with a payment and paperwork checklist.'], default: ['Send the main message at the recommended time.','If no reply within 2 days, use the shorter version.','After a week of silence, switch to the stronger closing version.'] };
+      const steps = stepsMap[status] || stepsMap['default'];
+      el('fu-strategy').innerHTML = steps.map((s,i) => `<div class="sc" style="margin-bottom:${i<steps.length-1?'7px':'0'}"><div class="sn">Step ${i+1}</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s}</div></div>`).join('');
+      const timeMap = { 'Same day': '🕐 Send between 7–8 PM tonight.', 'Next day': '🕛 Send between 12–1 PM tomorrow — lunchtime is ideal.', '3 days later': '🕙 Tuesday or Wednesday, 10–11 AM.', '1 week later': '🕚 Monday or Tuesday at 11 AM.' };
+      el('fu-timing-out').textContent = timeMap[timing] || 'Send between 12–1 PM or 7–8 PM for best results.';
+      const dontMap = { 'Ghosted': ["Don\'t say \"Just checking in again\" — signals desperation","Don\'t send 3 messages without a reply","Don\'t guilt-trip them"], 'Comparing': ["Don\'t immediately offer a discount","Don\'t say \"We are the cheapest\"","Don\'t pressure them to decide today"], 'Ready to buy': ["Don\'t delay your reply — respond within the hour","Don\'t add new information","Don\'t change the offer — it creates doubt"], default: ["Don\'t start with \"Sorry to bother you\"","Don\'t send a wall of text","Don\'t ask \"Are you still interested?\""] };
+      const donts = dontMap[status] || dontMap['default'];
+      el('fu-donts').innerHTML = `<div class="wh">⚠️ Avoid these</div>` + donts.map(d => `<div class="wm" style="margin-bottom:4px">✕ ${d}</div>`).join('');
     }
 
-    const closing = { Friendly: `Looking forward to hearing from you! Have a great day ahead. 😊`, Professional: `Please feel free to reach out at your convenience. I'm happy to assist.`, Urgent: `Units are moving fast — if you'd like to secure yours, just say the word. ⚡`, 'Soft reminder': `No rush at all — just here whenever you're ready. 🙂`, 'Premium consultant': `I'll ensure the experience is seamless from here. Do let me know how you'd like to proceed.` }[tone] || `Looking forward to hearing from you!`;
+    if (gpt) {
+      el('fu-main').textContent   = gpt.mainMsg   || '';
+      el('fu-short').textContent  = gpt.shortMsg  || '';
+      el('fu-strong').textContent = gpt.strongMsg || '';
+      const steps = gpt.strategy || [];
+      el('fu-strategy').innerHTML = steps.map((s,i) => `<div class="sc" style="margin-bottom:${i<steps.length-1?'7px':'0'}"><div class="sn">Step ${i+1}</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s}</div></div>`).join('');
+      el('fu-timing-out').textContent = gpt.bestTime || '';
+      const donts = gpt.donts || [];
+      el('fu-donts').innerHTML = `<div class="wh">⚠️ Avoid these</div>` + donts.map(d => `<div class="wm" style="margin-bottom:4px">✕ ${d}</div>`).join('');
+    } else { applyLocal(); }
 
-    const mainMsg  = `${greet}\n\n${context}.\n\n${middle}${objLine}\n\n${closing}\n\n– [Your name] | [Dealership]`;
-    const shortMsg = `${greet} Just checking in on the ${car} — any questions I can help with? ${tone === 'Urgent' ? 'Units moving fast! ⚡' : 'Happy to assist anytime. 😊'}\n\n– [Your name]`;
-    const strongMap = {
-      'Ghosted':     `${greet}\n\nI'll be honest — I have another customer interested in the same spec of ${car} and I'm not sure how long I can hold it.\n\nIf you're still keen, let's get it locked in before it goes. Just a simple confirmation from you is all I need.\n\nIf the timing's not right, no worries — just let me know either way.\n\n– [Your name]`,
-      'Comparing':   `${greet}\n\nI know you're comparing a few options — I respect that. But I'd like to put our best foot forward before you make your final call.\n\nCan I offer you one more look at the ${car} with a revised package? I'm confident we can make this work.\n\nJust 30 minutes of your time — that's all I'm asking.\n\n– [Your name]`,
-      'Negotiating': `${greet}\n\nI've spoken to my manager and I have something better to show you on the ${car}.\n\nCan we meet briefly — even a quick call works? I'd rather close this right than leave you with questions.\n\n– [Your name]`,
-      'default':     `${greet}\n\nI wanted to be upfront — I'd really like to help you drive home in the ${car}, and I'll do my best to make the numbers work.\n\nWhat would it take for you to say yes? Tell me and I'll do my best.\n\n– [Your name]`
-    };
-
-    el('fu-main').textContent   = mainMsg;
-    el('fu-short').textContent  = shortMsg;
-    el('fu-strong').textContent = strongMap[status] || strongMap['default'];
-
-    const stratSteps = status === 'Ghosted' ? [
-      'Send the short version first — no pressure, just a check-in.',
-      'Wait 2 days. If no reply, send the strong closing version with urgency.',
-      'If still no reply after 5 days, send a final message and give them an easy out.'
-    ] : status === 'Comparing' ? [
-      'Send the main message today to stay top of mind.',
-      'Offer a specific differentiator — free servicing, package, or test drive — not just a price drop.',
-      'Follow up in 3 days if no reply, then weekly until they decide.'
-    ] : status === 'Ready to buy' ? [
-      'Send the main message within the hour — strike while intent is hot.',
-      'Confirm unit, colour, and delivery date in the same message if possible.',
-      'Follow up with a payment and paperwork checklist to maintain momentum.'
-    ] : [
-      'Send the main message at the recommended time window.',
-      'If no reply within 2 days, follow up with the shorter version.',
-      'After a week of silence, switch to the stronger closing version.'
-    ];
-    el('fu-strategy').innerHTML = stratSteps.map((s, i) =>
-      `<div class="sc" style="margin-bottom:${i<stratSteps.length-1?'7px':'0'}"><div class="sn">Step ${i+1}</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s}</div></div>`
-    ).join('');
-
-    const timeMap = {
-      'Same day':     '🕐 Send between 7–8 PM tonight — after dinner, when people are relaxed and checking their phones. Avoid after 9 PM.',
-      'Next day':     '🕛 Send between 12–1 PM tomorrow — lunchtime is ideal. People are away from work stress and more likely to respond.',
-      '3 days later': '🕙 Send on a Tuesday or Wednesday between 10–11 AM — mid-week, mid-morning performs best.',
-      '1 week later': '🕚 Send the following Monday or Tuesday at 11 AM — start of the week when people are planning ahead.'
-    };
-    el('fu-timing-out').textContent = timeMap[timing] || 'Send between 12–1 PM or 7–8 PM for best response rates. Avoid Monday mornings and Friday evenings.';
-
-    const dontMap = {
-      'Ghosted':    ["Don't say \"Just checking in again\" — it signals desperation","Don't send 3 messages without a reply — space them out","Don't guilt-trip them with \"You said you were interested...\""],
-      'Comparing':  ["Don't immediately offer a discount — it devalues your product","Don't say \"We are the cheapest\" — compete on value","Don't pressure them to decide today unless there's a real deadline"],
-      'Ready to buy':["Don't delay your reply — respond within the hour","Don't add new information that complicates the decision","Don't change the offer at this stage — it creates doubt"],
-      'default':    ["Don't start with \"Sorry to bother you\" — it weakens your position","Don't send a wall of text — keep it easy to read on mobile","Don't ask \"Are you still interested?\" — it invites a no"]
-    };
-    const donts = dontMap[status] || dontMap['default'];
-    el('fu-donts').innerHTML = `<div class="wh">⚠️ Avoid these</div>` + donts.map(d => `<div class="wm" style="margin-bottom:4px">✕ ${d}</div>`).join('');
-
-    ['cp-main','cp-short','cp-strong'].forEach(id => { const b = el(id); b.innerHTML = '&#128203; Copy'; b.classList.remove('ok'); });
+    ['cp-main','cp-short','cp-strong'].forEach(id => { const b = el(id); if(b){b.innerHTML = '&#128203; Copy'; b.classList.remove('ok');} });
     btn.innerHTML = '&#128172; Generate messages'; btn.classList.remove('loading');
     el('fu-results').style.display = '';
     el('fu-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 1000);
+  });
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2170,119 +2097,142 @@ let _lastVmProfile = null, _lastVmResults = null;
 
 function runVehicleMatch() {
   const profile = {
-    budget:    gv('vm-budget'),
-    type:      _vmState['vm-type'],
-    pref:      [..._vmState['vm-pref']],
-    condition: _vmState['vm-condition'],
-    family:    _vmState['vm-family'],
-    driving:   _vmState['vm-driving'],
-    priority:  _vmState['vm-priority'],
-    specific:  gv('vm-specific')
+    budget:    gv('vm-budget'), type: _vmState['vm-type'],
+    pref:      [..._vmState['vm-pref']], condition: _vmState['vm-condition'],
+    family:    _vmState['vm-family'],   driving:   _vmState['vm-driving'],
+    priority:  _vmState['vm-priority'], specific:  gv('vm-specific')
   };
-
   const btn = el('vm-btn');
-  btn.innerHTML = '<div class="spinner"></div> Matching...';
-  btn.classList.add('loading');
+  btn.innerHTML = '<div class="spinner"></div> Matching...'; btn.classList.add('loading');
 
-  setTimeout(() => {
-    // Score all vehicles
-    const scored = VM_VEHICLES.map(v => {
-      const { score, reasons } = vm_scoreVehicle(v, profile);
-      return { ...v, score, reasons };
-    }).sort((a, b) => b.score - a.score);
+  apexAI('match', profile).then(gpt => {
+    let top5, talkingPoints, alts;
 
-    const top5 = scored.slice(0, 5);
+    if (gpt && gpt.recommendations && gpt.recommendations.length) {
+      // GPT path
+      top5 = gpt.recommendations.slice(0,5);
+      talkingPoints = gpt.talkingPoints || [];
+      alts = gpt.alternatives || [];
 
-    // Render Top 5 cards
-    el('vm-cards').innerHTML = top5.map((v, idx) => {
-      const scoreCls = v.score >= 75 ? '' : v.score >= 55 ? 'med' : 'low';
-      const barColor = v.score >= 75 ? 'var(--green)' : v.score >= 55 ? 'var(--amb)' : 'var(--red)';
-      const budgetVal = parseInt(profile.budget) || Math.round((v.budgetMin + v.budgetMax) / 2);
-      const monthly   = vm_monthly(v, budgetVal);
-      const objHtml   = v.objections.map(o => `<li>${o}</li>`).join('');
-
-      return `<div class="vm-match-card">
-        <div class="vm-match-header">
-          <div>
-            <div class="vm-match-rank">#${idx+1} recommendation</div>
-            <div class="vm-match-name">${v.name}</div>
-            <div class="vm-score-bar-bg"><div class="vm-score-bar" style="width:${v.score}%;background:${barColor}"></div></div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div class="vm-score-badge ${scoreCls}">${v.score}%</div>
-            <div style="font-size:10px;color:var(--muted);margin-top:4px">${v.type} · ${v.segment}</div>
-          </div>
-        </div>
-        <div class="vm-match-body">
-          <div class="vm-why">${v.reasons.join('. ')}.</div>
-          <div class="vm-row">
-            <div class="vm-stat"><div class="vm-stat-l">Est. depreciation / yr</div><div class="vm-stat-v">${sgd(v.depr)}</div></div>
-            <div class="vm-stat"><div class="vm-stat-l">Est. monthly (30% DP, 7yr)</div><div class="vm-stat-v">${sgd(monthly)}/mo</div></div>
-            <div class="vm-stat"><div class="vm-stat-l">Price range</div><div class="vm-stat-v">${sgd(v.budgetMin)}–${sgd(v.budgetMax)}</div></div>
-            <div class="vm-stat"><div class="vm-stat-l">Ideal buyer</div><div class="vm-stat-v" style="font-size:11px;white-space:normal;line-height:1.4">${v.ideal.substring(0,60)}…</div></div>
-          </div>
-          <div class="vm-pro-con">
-            <div class="vm-pros"><div class="vm-pro-title">✅ Pros</div><ul>${v.pros.map(p=>`<li>${p}</li>`).join('')}</ul></div>
-            <div class="vm-cons"><div class="vm-con-title">⚠️ Cons</div><ul>${v.cons.map(c=>`<li>${c}</li>`).join('')}</ul></div>
-          </div>
-
-          <button class="accordion-toggle" onclick="vm_toggleAcc(this)">
-            More details <span>▼</span>
-          </button>
-          <div class="accordion-body">
-            <div class="vm-section-label" style="margin-top:.75rem">Ideal buyer</div>
-            <div class="vm-section-text">${v.ideal}</div>
-            <div class="vm-avoid" style="margin-top:.625rem">
-              <div class="vm-avoid-title">❌ Who should NOT buy this car</div>
-              <div class="vm-avoid-text">${v.avoid}</div>
+      el('vm-cards').innerHTML = top5.map((v,idx) => {
+        const scoreCls = v.score>=75?'':v.score>=55?'med':'low';
+        const barColor = v.score>=75?'var(--green)':v.score>=55?'var(--amb)':'var(--red)';
+        return `<div class="vm-match-card">
+          <div class="vm-match-header">
+            <div>
+              <div class="vm-match-rank">#${idx+1} recommendation</div>
+              <div class="vm-match-name">${v.name}</div>
+              <div class="vm-score-bar-bg"><div class="vm-score-bar" style="width:${v.score}%;background:${barColor}"></div></div>
             </div>
-            <div class="vm-section-label" style="margin-top:.75rem">Potential objections to prepare for</div>
-            <ul class="vm-tp-list">${objHtml}</ul>
+            <div style="text-align:right;flex-shrink:0">
+              <div class="vm-score-badge ${scoreCls}">${v.score}%</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px">${v.type||''} · ${v.segment||''}</div>
+            </div>
           </div>
-        </div>
-      </div>`;
-    }).join('');
+          <div class="vm-match-body">
+            <div class="vm-why">${(v.reasons||[]).join('. ')}.</div>
+            <div class="vm-row">
+              <div class="vm-stat"><div class="vm-stat-l">Est. depreciation / yr</div><div class="vm-stat-v">${v.depr?sgd(v.depr):'–'}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Est. monthly</div><div class="vm-stat-v">${v.monthlyEst?sgd(v.monthlyEst)+'/mo':'–'}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Price range</div><div class="vm-stat-v">${v.priceMin&&v.priceMax?sgd(v.priceMin)+'–'+sgd(v.priceMax):'–'}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Ideal buyer</div><div class="vm-stat-v" style="font-size:11px;white-space:normal;line-height:1.4">${(v.ideal||'').substring(0,60)}…</div></div>
+            </div>
+            <div class="vm-pro-con">
+              <div class="vm-pros"><div class="vm-pro-title">✅ Pros</div><ul>${(v.pros||[]).map(p=>'<li>'+p+'</li>').join('')}</ul></div>
+              <div class="vm-cons"><div class="vm-con-title">⚠️ Cons</div><ul>${(v.cons||[]).map(c=>'<li>'+c+'</li>').join('')}</ul></div>
+            </div>
+            <button class="accordion-toggle" onclick="vm_toggleAcc(this)">More details <span>▼</span></button>
+            <div class="accordion-body">
+              <div class="vm-section-label" style="margin-top:.75rem">Ideal buyer</div>
+              <div class="vm-section-text">${v.ideal||''}</div>
+              <div class="vm-avoid" style="margin-top:.625rem">
+                <div class="vm-avoid-title">❌ Who should NOT buy this car</div>
+                <div class="vm-avoid-text">${v.avoid||''}</div>
+              </div>
+              <div class="vm-section-label" style="margin-top:.75rem">Potential objections</div>
+              <ul class="vm-tp-list">${(v.objections||[]).map(o=>'<li>'+o+'</li>').join('')}</ul>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
 
-    // Alternatives section
-    if (profile.specific) {
-      el('vm-alt-model-name').textContent = profile.specific;
-      const alts = vm_getAlternatives(profile.specific);
-      el('vm-alt-list').innerHTML = alts.map(a =>
-        `<div class="vm-alt-card"><div class="vm-alt-name">&#128663; ${a.name}</div><div class="vm-alt-why">${a.why}</div></div>`
-      ).join('');
-      el('vm-alt-section').style.display = '';
     } else {
-      el('vm-alt-section').style.display = 'none';
+      // Local fallback
+      const scored = VM_VEHICLES.map(v => { const {score,reasons} = vm_scoreVehicle(v,profile); return {...v,score,reasons}; }).sort((a,b)=>b.score-a.score);
+      top5 = scored.slice(0,5);
+      talkingPoints = [];
+      alts = profile.specific ? vm_getAlternatives(profile.specific) : [];
+
+      el('vm-cards').innerHTML = top5.map((v,idx) => {
+        const scoreCls = v.score>=75?'':v.score>=55?'med':'low';
+        const barColor = v.score>=75?'var(--green)':v.score>=55?'var(--amb)':'var(--red)';
+        const budgetVal = parseInt(profile.budget)||Math.round((v.budgetMin+v.budgetMax)/2);
+        const monthly = vm_monthly(v,budgetVal);
+        return `<div class="vm-match-card">
+          <div class="vm-match-header">
+            <div>
+              <div class="vm-match-rank">#${idx+1} recommendation</div>
+              <div class="vm-match-name">${v.name}</div>
+              <div class="vm-score-bar-bg"><div class="vm-score-bar" style="width:${v.score}%;background:${barColor}"></div></div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div class="vm-score-badge ${scoreCls}">${v.score}%</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px">${v.type} · ${v.segment}</div>
+            </div>
+          </div>
+          <div class="vm-match-body">
+            <div class="vm-why">${v.reasons.join('. ')}.</div>
+            <div class="vm-row">
+              <div class="vm-stat"><div class="vm-stat-l">Est. depreciation / yr</div><div class="vm-stat-v">${sgd(v.depr)}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Est. monthly (30% DP, 7yr)</div><div class="vm-stat-v">${sgd(monthly)}/mo</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Price range</div><div class="vm-stat-v">${sgd(v.budgetMin)}–${sgd(v.budgetMax)}</div></div>
+              <div class="vm-stat"><div class="vm-stat-l">Ideal buyer</div><div class="vm-stat-v" style="font-size:11px;white-space:normal;line-height:1.4">${v.ideal.substring(0,60)}…</div></div>
+            </div>
+            <div class="vm-pro-con">
+              <div class="vm-pros"><div class="vm-pro-title">✅ Pros</div><ul>${v.pros.map(p=>'<li>'+p+'</li>').join('')}</ul></div>
+              <div class="vm-cons"><div class="vm-con-title">⚠️ Cons</div><ul>${v.cons.map(c=>'<li>'+c+'</li>').join('')}</ul></div>
+            </div>
+            <button class="accordion-toggle" onclick="vm_toggleAcc(this)">More details <span>▼</span></button>
+            <div class="accordion-body">
+              <div class="vm-section-label" style="margin-top:.75rem">Ideal buyer</div>
+              <div class="vm-section-text">${v.ideal}</div>
+              <div class="vm-avoid" style="margin-top:.625rem"><div class="vm-avoid-title">❌ Who should NOT buy this car</div><div class="vm-avoid-text">${v.avoid}</div></div>
+              <div class="vm-section-label" style="margin-top:.75rem">Potential objections</div>
+              <ul class="vm-tp-list">${v.objections.map(o=>'<li>'+o+'</li>').join('')}</ul>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
     }
 
-    // Sales talking points (customer-specific)
-    const talkingPoints = [];
-    if (profile.type)     talkingPoints.push(`Customer has indicated a preference for ${profile.type} — focus your presentation on the top-ranked ${profile.type} options and avoid diverting to other body styles unless they open the door.`);
-    if (profile.pref.includes('Fuel Economy')) talkingPoints.push('This customer is fuel-economy focused — open with the hybrid\'s real-world fuel costs and compare it directly to what they\'re spending on petrol now. Numbers close this customer.');
-    if (profile.pref.includes('Reliability'))  talkingPoints.push('Reliability is a stated priority — lead with the manufacturer\'s reliability ranking and any JD Power or Consumer Reports data you have. Toyota\'s 10-year reliability data is particularly compelling.');
-    if (profile.pref.includes('Low Depreciation')) talkingPoints.push('This customer is thinking about total cost of ownership — show the depreciation figures over 5 years side by side. A car that costs SGD 10,000 more upfront but depreciates SGD 2,000 less per year pays for itself in 5 years.');
-    if (profile.pref.includes('Safety'))       talkingPoints.push('Safety is a key concern — have the ANCAP or Euro NCAP safety rating ready. For family buyers, rear collision warnings and automatic emergency braking are particularly compelling talking points.');
-    if (profile.family && parseInt(profile.family) >= 4) talkingPoints.push(`With a family of ${profile.family}, prioritise demonstrating rear seat space — offer a seating demonstration with all seats occupied during the test drive. Buyers with children respond strongly to seeing it in practice.`);
-    if (profile.priority === 'Lowest Monthly Payment') talkingPoints.push('Monthly payment is the top priority — have three finance scenarios ready: 5yr, 6yr, and 7yr tenure options with their respective monthly figures. Seeing the numbers move is more persuasive than any verbal description.');
-    if (profile.priority === 'Luxury') talkingPoints.push('This is a luxury buyer — the environment and presentation matter as much as the car. Offer a private viewing space, have refreshments ready, and take your time with the interior walkthrough. Rushing a luxury buyer is the fastest way to lose them.');
-    if (profile.driving === 'Long')    talkingPoints.push('Long daily commutes mean fuel economy and ride comfort are the two most important real-world factors — lead with the hybrid\'s highway fuel figures and arrange a highway test drive if possible.');
-    while (talkingPoints.length < 5) talkingPoints.push('Build trust before building urgency — this customer profile responds better to consultative selling than hard closes. Listen twice as much as you speak in the first 15 minutes.');
-    el('vm-talking-points').innerHTML = talkingPoints.slice(0,5).map(t => `<li><span>&#128172;</span>${t}</li>`).join('');
+    // Alternatives
+    if (profile.specific) {
+      el('vm-alt-model-name').textContent = profile.specific;
+      const altList = alts.length ? alts : vm_getAlternatives(profile.specific);
+      el('vm-alt-list').innerHTML = altList.map(a => `<div class="vm-alt-card"><div class="vm-alt-name">&#128663; ${a.name}</div><div class="vm-alt-why">${a.why}</div></div>`).join('');
+      el('vm-alt-section').style.display = '';
+    } else { el('vm-alt-section').style.display = 'none'; }
 
-    // Store for saving
-    _lastVmProfile  = profile;
-    _lastVmResults  = top5;
+    // Talking points
+    const tp = talkingPoints.length ? talkingPoints : [
+      profile.type ? `Customer prefers ${profile.type} — lead with your top-ranked ${profile.type} options.` : 'Present the top match first — don\'t offer too many options at once.',
+      profile.pref.includes('Fuel Economy') ? 'Lead with the hybrid\'s real-world fuel costs vs current petrol spend.' : 'Highlight total cost of ownership, not just sticker price.',
+      profile.pref.includes('Reliability') ? 'Have manufacturer reliability rankings and JD Power data ready.' : 'Emphasise after-sales support and warranty coverage.',
+      profile.priority === 'Lowest Monthly Payment' ? 'Have three finance scenarios ready — 5yr, 6yr, 7yr — to show live.' : 'Focus on long-term value, not just upfront price.',
+      'Build trust before price — listen for the first 10 minutes before recommending anything.'
+    ];
+    el('vm-talking-points').innerHTML = tp.slice(0,5).map(t => `<li><span>&#128172;</span>${t}</li>`).join('');
 
-    // Reset save button
-    const sb = el('vm-save-btn');
-    sb.innerHTML = '&#128190; Save match'; sb.classList.remove('saved'); sb.disabled = false;
-
+    _lastVmProfile = profile;
+    _lastVmResults = top5.map(v => ({ name: v.name, score: v.score, type: v.type||'' }));
+    const sb = el('vm-save-btn'); sb.innerHTML = '&#128190; Save match'; sb.classList.remove('saved'); sb.disabled = false;
     btn.innerHTML = '&#127775; Find best match'; btn.classList.remove('loading');
     el('vm-results').style.display = '';
     el('vm-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
     renderVmHistory();
-  }, 1100);
+  });
 }
+
 
 function vm_toggleAcc(btn) {
   const body = btn.nextElementSibling;
@@ -2618,63 +2568,52 @@ function ob_normalize(text) {
 function analyzeObjection() {
   const raw = gv('ob-input');
   if (!raw) { showToast('Please enter or select an objection first'); return; }
-
   const btn = el('ob-btn');
-  btn.innerHTML = '<div class="spinner"></div> Analyzing...';
-  btn.classList.add('loading');
+  btn.innerHTML = '<div class="spinner"></div> Analyzing...'; btn.classList.add('loading');
 
-  setTimeout(() => {
-    const key  = ob_normalize(raw);
-    const data = OBJ_DB[key] || OBJ_DB['other'];
+  apexAI('objection', { objection: raw }).then(gpt => {
+    function applyLocal() {
+      const key  = ob_normalize(raw);
+      const data = OBJ_DB[key] || OBJ_DB['other'];
+      el('ob-real-list').innerHTML = data.real.map(r => `<div class="ob-reason-row"><div class="ob-reason-label">${r.label}</div><div class="ob-bar-wrap"><div class="ob-bar-bg"><div class="ob-bar-fill" style="width:${r.pct}%"></div></div></div><div class="ob-pct">${r.pct}%</div></div>`).join('');
+      el('ob-psych-text').textContent = data.psych;
+      el('ob-question').textContent   = data.question;
+      el('ob-donts').innerHTML = `<div class="ob-dont-title">❌ What NOT to say or do</div>` + data.donts.map(d => `<div class="ob-dont-item"><div class="ob-dont-x">${d.x}</div><div><div class="ob-dont-text">${d.text}</div><div class="ob-dont-text" style="opacity:.75;margin-top:3px;font-size:12px">Why: ${d.why}</div></div></div>`).join('');
+      el('ob-strategy').innerHTML = data.strategy.map((s,i) => `<div class="sc" style="background:transparent;padding:0;margin-bottom:${i<data.strategy.length-1?'10px':'0'};border:none"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`).join('');
+      const pct = data.closing, barColor = pct>=60?'var(--green)':pct>=40?'var(--amb)':'var(--red)';
+      el('ob-close-pct').textContent = pct+'%'; el('ob-close-pct').style.color = barColor;
+      el('ob-close-bar').style.width = pct+'%'; el('ob-close-bar').style.background = barColor;
+      el('ob-close-note').textContent = data.closeNote;
+      return { objection: raw, key, data, ts: Date.now() };
+    }
 
-    // 1. Real objection — confidence bars
-    el('ob-real-list').innerHTML = data.real.map(r => `
-      <div class="ob-reason-row">
-        <div class="ob-reason-label">${r.label}</div>
-        <div class="ob-bar-wrap"><div class="ob-bar-bg"><div class="ob-bar-fill" style="width:${r.pct}%"></div></div></div>
-        <div class="ob-pct">${r.pct}%</div>
-      </div>`).join('');
+    let analysis;
+    if (gpt) {
+      // Render from GPT
+      el('ob-real-list').innerHTML = (gpt.real||[]).map(r => `<div class="ob-reason-row"><div class="ob-reason-label">${r.label}</div><div class="ob-bar-wrap"><div class="ob-bar-bg"><div class="ob-bar-fill" style="width:${r.pct}%"></div></div></div><div class="ob-pct">${r.pct}%</div></div>`).join('');
+      el('ob-psych-text').textContent = gpt.psych || '';
+      el('ob-question').textContent   = gpt.question || '';
+      el('ob-donts').innerHTML = `<div class="ob-dont-title">❌ What NOT to say or do</div>` + (gpt.donts||[]).map(d => `<div class="ob-dont-item"><div class="ob-dont-x">${d.x||'❌'}</div><div><div class="ob-dont-text">${d.text}</div><div class="ob-dont-text" style="opacity:.75;margin-top:3px;font-size:12px">Why: ${d.why}</div></div></div>`).join('');
+      el('ob-strategy').innerHTML = (gpt.strategy||[]).map((s,i) => `<div class="sc" style="background:transparent;padding:0;margin-bottom:${i<(gpt.strategy.length-1)?'10px':'0'};border:none"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`).join('');
+      const pct = gpt.closing||50, barColor = pct>=60?'var(--green)':pct>=40?'var(--amb)':'var(--red)';
+      el('ob-close-pct').textContent = pct+'%'; el('ob-close-pct').style.color = barColor;
+      el('ob-close-bar').style.width = pct+'%'; el('ob-close-bar').style.background = barColor;
+      el('ob-close-note').textContent = gpt.closeNote || '';
+      analysis = { objection: raw, key: ob_normalize(raw), data: { ...gpt, closing: pct }, ts: Date.now() };
+    } else {
+      analysis = applyLocal();
+    }
 
-    // 2. Psychology
-    el('ob-psych-text').textContent = data.psych;
-
-    // 3. Next best question
-    el('ob-question').textContent = data.question;
-
-    // 4. What NOT to say
-    el('ob-donts').innerHTML = `<div class="ob-dont-title">❌ What NOT to say or do</div>` +
-      data.donts.map(d => `<div class="ob-dont-item"><div class="ob-dont-x">${d.x}</div><div><div class="ob-dont-text">${d.text}</div><div class="ob-dont-text" style="opacity:.75;margin-top:3px;font-size:12px">Why: ${d.why}</div></div></div>`).join('');
-
-    // 5. Strategy
-    el('ob-strategy').innerHTML = data.strategy.map((s, i) =>
-      `<div class="sc" style="background:transparent;padding:0;margin-bottom:${i<data.strategy.length-1?'10px':'0'};border:none"><div class="sn">Step ${i+1}</div><div><div class="st">${s.t}</div><div class="sd">${s.d}</div></div></div>`
-    ).join('');
-
-    // 6. Closing probability
-    const pct = data.closing;
-    const barColor = pct >= 60 ? 'var(--green)' : pct >= 40 ? 'var(--amb)' : 'var(--red)';
-    el('ob-close-pct').textContent = pct + '%';
-    el('ob-close-bar').style.width = pct + '%';
-    el('ob-close-bar').style.background = barColor;
-    el('ob-close-pct').style.color = barColor;
-    el('ob-close-note').textContent = data.closeNote;
-
-    // Store for saving
-    _lastObjAnalysis = { objection: raw, key, data, ts: Date.now() };
-
-    // Reset save button
-    const sb = el('ob-save-btn');
-    sb.innerHTML = '&#128190; Save to Objection Library';
-    sb.classList.remove('saved'); sb.disabled = false;
-
+    _lastObjAnalysis = analysis;
+    const sb = el('ob-save-btn'); sb.innerHTML = '&#128190; Save to Objection Library'; sb.classList.remove('saved'); sb.disabled = false;
     btn.innerHTML = '&#129504; Analyze objection'; btn.classList.remove('loading');
     el('ob-results').style.display = '';
     el('ob-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
     renderObjLibrary();
-  }, 900);
+  });
 }
 
-/* ── Save to Objection Library ── */
+
 function saveToObjLibrary() {
   if (!_lastObjAnalysis) { showToast('Analyze an objection first'); return; }
 
@@ -2887,69 +2826,150 @@ function cp_analyse(fullNotes) {
 }
 
 function cp_update() {
-  const notes = el('cp-notes').value.trim();
+  var notes = el('cp-notes').value.trim();
   if (!notes) { showToast('Type some notes first'); return; }
 
-  const btn = el('cp-update-btn');
+  var btn = el('cp-update-btn');
   btn.innerHTML = '<div class="spinner"></div> Analyzing...';
   btn.classList.add('loading');
 
   // Accumulate notes
   _cp.allNotes.push(notes);
   _cp.updates++;
+  var elapsed = cp_now(), timeStr = cp_timeStr();
+  var n = notes.toLowerCase();
+  var tlText = 'Update #' + _cp.updates;
+  if      (n.includes('test drive'))                        tlText = 'Test drive discussed';
+  else if (n.includes('monthly') || n.includes('instal'))   tlText = 'Finance discussed';
+  else if (n.includes('warranty'))                          tlText = 'Warranty discussed';
+  else if (n.includes('wife') || n.includes('spouse'))      tlText = 'Spouse mentioned';
+  else if (n.includes('trade'))                             tlText = 'Trade-in discussed';
+  else if (n.includes('compar'))                            tlText = 'Competitor comparison raised';
+  else if (n.includes('expens') || n.includes('too high'))  tlText = 'Objection raised';
+  else if (n.includes('agree') || n.includes('yes'))        tlText = 'Positive signal';
+  _cp.timeline.push({ time: timeStr, elapsed: elapsed, text: tlText, type: 'update' });
 
-  // Add timeline entry
-  const elapsed = cp_now();
-  const timeStr = cp_timeStr();
+  var fullNotes = _cp.allNotes.join(' ');
+  var prevNotes = _cp.allNotes.slice(0, -1).join(' ');
 
-  // Auto-detect what to log
-  const n = notes.toLowerCase();
-  let tlText = `Update #${_cp.updates}`;
-  if (n.includes('test drive'))         tlText = 'Test drive discussed';
-  else if (n.includes('monthly') || n.includes('instalment')) tlText = 'Finance / instalment discussed';
-  else if (n.includes('warranty'))      tlText = 'Warranty discussed';
-  else if (n.includes('wife') || n.includes('spouse')) tlText = 'Spouse mentioned';
-  else if (n.includes('trade'))         tlText = 'Trade-in discussed';
-  else if (n.includes('compar'))        tlText = 'Competitor comparison raised';
-  else if (n.includes('object') || n.includes('expensive') || n.includes('too high')) tlText = 'Objection raised';
-  else if (n.includes('agree') || n.includes('yes') || n.includes('ok')) tlText = 'Positive signal';
-  _cp.timeline.push({ time: timeStr, elapsed, text: tlText, type: 'update' });
+  // Remove any previous notice
+  var existing = document.querySelector('#cp-live .apex-api-notice');
+  if (existing) existing.remove();
 
-  setTimeout(() => {
-    const fullNotes = _cp.allNotes.join(' ');
-    const result = cp_analyse(fullNotes);
-    _cp.lastAnalysis = result;
+  // ── Call the secure backend ──
+  fetch('/api/apex-ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      module: 'live_copilot',
+      input: { notes: fullNotes, liveNotes: notes },
+      context: {
+        previousNotes: prevNotes,
+        dealContext: _cp.allNotes.length > 1
+          ? ('Ongoing deal — ' + _cp.updates + ' updates so far')
+          : 'First update in this deal'
+      }
+    })
+  })
+  .then(function(resp) {
+    // Always parse the JSON body — even error responses have useful info
+    return resp.json().then(function(data) {
+      return { httpStatus: resp.status, data: data };
+    });
+  })
+  .then(function(payload) {
+    var httpStatus = payload.httpStatus;
+    var data       = payload.data;
 
-    // Status row
-    el('cp-mood-icon').textContent = result.moodIcon;
-    el('cp-mood-val').textContent  = result.mood;
-    el('cp-intent-val').textContent = result.intent + '%';
-    el('cp-trust-val').textContent  = result.trust;
-    el('cp-risk-val').textContent   = result.risk;
-
-    // Intent bar
-    const barColor = result.intent >= 65 ? 'var(--green)' : result.intent >= 40 ? 'var(--amb)' : 'var(--red)';
-    el('cp-intent-pct').textContent = result.intent + '%';
-    el('cp-intent-fill').style.width      = result.intent + '%';
-    el('cp-intent-fill').style.background = barColor;
-    el('cp-intent-bar').style.display = '';
-
-    // Emotions
-    el('cp-emotion-wrap').style.display = '';
-    el('cp-emotion-wrap').innerHTML = result.emotions.map(e =>
-      `<span class="cp-emotion-tag active" style="background:${e.bg};color:${e.color};border-color:${e.color}">${e.label}</span>`
-    ).join('');
-
-    // Coaching
-    el('cp-say').textContent    = result.say;
-    el('cp-warn').textContent   = result.warn;
-    el('cp-action').textContent = result.action;
-    el('cp-coaching').style.display = '';
-
-    btn.innerHTML = '&#129504; Update — analyze notes';
+    btn.innerHTML = '&#9654;&#65039; Update — analyze notes';
     btn.classList.remove('loading');
-  }, 600);
+
+    if (httpStatus !== 200 || !data.ok) {
+      // ── Show the real error message on screen ──
+      var errMsg = data.error || ('HTTP ' + httpStatus + ' from /api/apex-ai');
+      if (data.detail) errMsg += ' — ' + data.detail;
+      if (data.fix)    errMsg += '. Fix: ' + data.fix;
+
+      // Display error banner inside the live screen
+      var banner = document.createElement('div');
+      banner.className = 'apex-api-notice';
+      banner.style.cssText = 'background:var(--rbg);border:1px solid var(--rbd);border-radius:10px;padding:10px 13px;margin-bottom:.875rem;font-size:12px;color:var(--red);line-height:1.5';
+      banner.innerHTML =
+        '<strong>❌ API error (HTTP ' + httpStatus + ')</strong><br>' + errMsg +
+        '<br><br><strong>⚡ Using offline fallback instead.</strong>' +
+        '<br><span style="opacity:.7">Tap the button again to retry.</span>';
+
+      var liveEl = el('cp-live');
+      if (liveEl) {
+        var old = liveEl.querySelector('.apex-api-notice');
+        if (old) old.remove();
+        liveEl.insertBefore(banner, liveEl.firstChild);
+      }
+
+      // Still apply local analysis so the app keeps working
+      cp_applyAnalysis(cp_analyse(fullNotes));
+      return;
+    }
+
+    // ── GPT success — apply the real result ──
+    cp_applyAnalysis(data.result);
+  })
+  .catch(function(networkErr) {
+    btn.innerHTML = '&#9654;&#65039; Update — analyze notes';
+    btn.classList.remove('loading');
+
+    var errMsg = networkErr.message || 'Network error';
+
+    var banner = document.createElement('div');
+    banner.className = 'apex-api-notice';
+    banner.style.cssText = 'background:var(--abg);border:1px solid var(--abd);border-radius:10px;padding:10px 13px;margin-bottom:.875rem;font-size:12px;color:var(--amb);line-height:1.5';
+    banner.innerHTML =
+      '<strong>⚠️ Cannot reach /api/apex-ai</strong><br>' + errMsg +
+      '<br><br><strong>Using offline fallback.</strong>' +
+      '<br><span style="opacity:.7">Check your internet connection or Vercel deployment.</span>';
+
+    var liveEl = el('cp-live');
+    if (liveEl) {
+      var old = liveEl.querySelector('.apex-api-notice');
+      if (old) old.remove();
+      liveEl.insertBefore(banner, liveEl.firstChild);
+    }
+
+    cp_applyAnalysis(cp_analyse(fullNotes));
+  });
 }
+
+
+// Shared renderer for both GPT and local copilot results
+function cp_applyAnalysis(result) {
+  if (!result) return;
+  _cp.lastAnalysis = result;
+
+  el('cp-mood-icon').textContent  = result.moodIcon || '😐';
+  el('cp-mood-val').textContent   = result.mood     || '–';
+  el('cp-intent-val').textContent = (result.intent  || 0) + '%';
+  el('cp-trust-val').textContent  = result.trust    || '–';
+  el('cp-risk-val').textContent   = result.risk     || '–';
+
+  var intent    = result.intent || 0;
+  var barColor  = intent >= 65 ? 'var(--green)' : intent >= 40 ? 'var(--amb)' : 'var(--red)';
+  el('cp-intent-pct').textContent          = intent + '%';
+  el('cp-intent-fill').style.width         = intent + '%';
+  el('cp-intent-fill').style.background    = barColor;
+  el('cp-intent-bar').style.display        = '';
+
+  var emotions = result.emotions || [{ label: 'Neutral', color: 'var(--muted)', bg: 'var(--s2)' }];
+  el('cp-emotion-wrap').style.display  = '';
+  el('cp-emotion-wrap').innerHTML      = emotions.map(function(e) {
+    return '<span class="cp-emotion-tag active" style="background:' + e.bg + ';color:' + e.color + ';border-color:' + e.color + '">' + e.label + '</span>';
+  }).join('');
+
+  el('cp-say').textContent    = result.say    || '';
+  el('cp-warn').textContent   = result.warn   || '';
+  el('cp-action').textContent = result.action || '';
+  el('cp-coaching').style.display = '';
+}
+
 
 function cp_showOutcome() {
   el('cp-outcome-sheet').style.display = '';
@@ -3449,7 +3469,152 @@ function cp_endDeal(outcome) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// SECTION 10: INIT
+// SECTION 10: APEX AI BRIDGE (FIXED v2)
+// Calls /api/apex-ai (OpenAI GPT on Vercel).
+// Shows real error messages. Falls back to local logic with a
+// visible "Using offline fallback" indicator when API is down.
+// ════════════════════════════════════════════════════════════════
+
+const APEX_API = '/api/apex-ai';
+
+// Show a dismissible error banner inside the given container id
+function apexShowError(containerId, errorMsg, isFallback) {
+  const wrap = el(containerId);
+  if (!wrap) return;
+  const existing = wrap.querySelector('.apex-api-notice');
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.className = 'apex-api-notice';
+  div.style.cssText = [
+    'background:' + (isFallback ? 'var(--abg)' : 'var(--rbg)'),
+    'border:1px solid ' + (isFallback ? 'var(--abd)' : 'var(--rbd)'),
+    'border-radius:10px',
+    'padding:10px 13px',
+    'margin-bottom:.875rem',
+    'font-size:12px',
+    'color:' + (isFallback ? 'var(--amb)' : 'var(--red)'),
+    'display:flex',
+    'gap:8px',
+    'align-items:flex-start',
+    'line-height:1.5'
+  ].join(';');
+  div.innerHTML = (isFallback ? '⚠️' : '❌') + ' <div><strong>' +
+    (isFallback ? 'Using offline fallback — ' : 'API error — ') +
+    '</strong>' + errorMsg + '</div>';
+  wrap.insertBefore(div, wrap.firstChild);
+}
+
+// Core API call — returns parsed result object or null on failure
+async function apexAI(moduleName, input, context) {
+  try {
+    const resp = await fetch(APEX_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ module: moduleName, input, context: context || null })
+    });
+
+    const data = await resp.json().catch(() => ({ ok: false, error: 'Response was not JSON' }));
+
+    if (!resp.ok || !data.ok) {
+      const msg = data.error || ('HTTP ' + resp.status);
+      console.warn('[ApexAI] ' + moduleName + ' error:', msg);
+      return { error: msg, fallback: true };
+    }
+
+    if (!data.result) {
+      return { error: 'API returned empty result', fallback: true };
+    }
+
+    return data.result;  // success — GPT result object
+
+  } catch (err) {
+    // Network failure (offline, DNS, CORS, etc.)
+    const msg = err.message || 'Network error';
+    console.warn('[ApexAI] ' + moduleName + ' network failure:', msg);
+    return { error: msg, fallback: true };
+  }
+}
+
+// Shared render helper used by both GPT and local coach paths
+function renderCoachResult(r, prof, d) {
+  el('p-type').textContent = prof.type; el('p-type-icon').textContent = prof.typeIcon;
+  el('p-stage').textContent = prof.stage; el('p-stage-icon').textContent = prof.stageIcon;
+  el('p-trust').textContent = prof.trust; el('p-trust-icon').textContent = prof.trustIcon;
+  el('p-urgency').textContent = prof.urgency;
+  el('p-prob').textContent = prof.prob + '%';
+  el('p-prob-bar').style.width = prof.prob + '%';
+  el('p-prob-bar').style.background = prof.probColor;
+
+  const concerns  = r.concerns  || [];
+  const questions = r.questions || [];
+  const warnings  = r.warnings  || [];
+  const strategy  = r.strategy  || [];
+
+  el('concerns-wrap').innerHTML = concerns.map(function(c) {
+    return '<div class="cc"><div class="cdot" style="background:' + (c.dot||'#888') + '"></div><div><div class="ct">' + c.text + '</div><div class="cs">' + (c.sub||'') + '</div></div></div>';
+  }).join('');
+  el('questions-wrap').innerHTML = questions.map(function(q, i) {
+    return '<div class="qc"><div class="qn">' + (i+1) + '</div><div class="qt">' + q + '</div></div>';
+  }).join('');
+  el('warnings-wrap').innerHTML = warnings.map(function(w) {
+    return '<div class="wc"><div class="wh">⚠️ Warning</div><div class="wm">' + w.main + '</div><div class="wr">Reason: ' + w.why + '</div></div>';
+  }).join('');
+  el('strategy-wrap').innerHTML = strategy.map(function(s, i) {
+    return '<div class="sc"><div class="sn">Step ' + (i+1) + '</div><div><div class="st">' + s.t + '</div><div class="sd">' + s.d + '</div></div></div>';
+  }).join('');
+
+  el('coach-wa').textContent = r.whatsapp || '';
+  el('r-profile').innerHTML = [
+    pill('Name', d.name), pill('Motivation', d.motivation), pill('Car', d.car),
+    pill('Budget',      d.budget  ? sgd(parseInt(d.budget))  : ''),
+    pill('Downpayment', d.dp     ? sgd(parseInt(d.dp))      : ''),
+    pill('Monthly',     d.monthly ? sgd(parseInt(d.monthly)) + '/mo' : ''),
+    pill('Tenure', d.tenure), pill('Trade-in', d.tradein),
+    pill('Timeline', d.timeline), pill('Viewed', d.showrooms)
+  ].join('');
+  el('r-concern').textContent  = r.concern    || '';
+  el('r-response').textContent = r.resp       || '';
+  el('r-discount').textContent = r.discount   || '';
+  el('r-finance').textContent  = r.finance    || '';
+  el('r-trust').innerHTML = (r.trust||[]).map(function(t){ return '<li>' + t + '</li>'; }).join('');
+  var rc = r.risk === 'High' ? 'rh' : r.risk === 'Medium' ? 'rm' : 'rl';
+  el('r-risk').innerHTML = '<span class="rbadge ' + rc + '">' + (r.risk||'Medium') + ' risk</span>';
+  el('r-risk-reason').textContent = r.riskReason || '';
+}
+
+// ── API connectivity test ──
+function cp_testAPI() {
+  var resultEl = el('cp-api-test-result');
+  if (resultEl) resultEl.innerHTML = '<span style="color:var(--muted)">&#128312; Testing...</span>';
+
+  fetch('/api/apex-ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      module: 'live_copilot',
+      input:  { notes: 'API connectivity test' },
+      context: {}
+    })
+  })
+  .then(function(resp) {
+    return resp.json().then(function(d){ return { status: resp.status, data: d }; });
+  })
+  .then(function(p) {
+    if (!resultEl) return;
+    if (p.status === 200 && p.data.ok) {
+      resultEl.innerHTML = '<span style="color:var(--green)">&#9989; API connected! GPT-4o mini is ready.</span>';
+    } else {
+      var msg = (p.data && p.data.error) ? p.data.error : ('HTTP ' + p.status);
+      resultEl.innerHTML = '<span style="color:var(--red)">&#10060; ' + msg + '</span>';
+    }
+  })
+  .catch(function(err) {
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--red)">&#10060; Cannot reach /api/apex-ai — ' + (err.message||'network error') + '</span>';
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// SECTION 11: INIT
 // ════════════════════════════════════════════════════════════════
 updateBadge();
 renderObjLibrary();

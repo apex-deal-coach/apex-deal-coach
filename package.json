@@ -1,0 +1,9 @@
+{
+  "name": "apex-deal-coach",
+  "version": "1.0.0",
+  "description": "Apex Deal Coach — Singapore Car Sales AI",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  }
+}
