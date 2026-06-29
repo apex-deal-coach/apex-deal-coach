@@ -14,6 +14,10 @@
 <div class="logo">
   <div class="li"><span>A</span></div>
   <div class="lt"><h1>Apex Deal Coach</h1><p>Singapore car sales · v12</p></div>
+  <div style="margin-left:auto;text-align:center;flex-shrink:0">
+    <div style="font-size:20px;font-weight:700;color:var(--text);line-height:1" id="today-count">0</div>
+    <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Today's<br>Deals</div>
+  </div>
 </div>
 
 <!-- NAVIGATION (9 tabs — scrollable) -->
@@ -31,9 +35,7 @@
 </div>
 </div>
 
-<!-- ================================================================
-     PAGE: DEAL COACH
-================================================================ -->
+<!-- PAGE: DEAL COACH -->
 <div class="page active" id="page-coach">
   <div class="sec">
     <div class="stitle">&#128100; Customer Info</div>
@@ -65,7 +67,6 @@
     <div class="f"><label>Notes</label><textarea id="notes" placeholder="Anything else about this customer..."></textarea></div>
   </div>
   <button class="btn bd" id="analyzeBtn" onclick="analyze()">&#129504; Analyze deal</button>
-
   <div id="report" style="display:none">
     <div class="seg">AI Customer Profile</div>
     <div class="sec" style="padding:1rem">
@@ -94,13 +95,11 @@
     <div class="rs"><h3>Finance explanation</h3><p id="r-finance"></p></div>
     <div class="rs"><h3>Trust-building</h3><ul id="r-trust"></ul></div>
     <div class="rs"><h3>Deal risk</h3><div id="r-risk"></div><p style="margin-top:8px" id="r-risk-reason"></p></div>
-    <button class="btn bg" id="saveBtn" onclick="saveCustomer()">&#128190; Save customer</button>
+    <button class="btn bg" id="saveBtn" onclick="saveCustomer()">&#128190; Save Deal</button>
   </div>
 </div>
 
-<!-- ================================================================
-     PAGE: FOLLOW-UP ENGINE
-================================================================ -->
+<!-- PAGE: FOLLOW-UP ENGINE -->
 <div class="page" id="page-followup">
   <div class="sec">
     <div class="stitle">&#128100; Customer Details</div>
@@ -140,9 +139,7 @@
   </div>
 </div>
 
-<!-- ================================================================
-     PAGE: FINANCE CALCULATOR
-================================================================ -->
+<!-- PAGE: FINANCE CALCULATOR -->
 <div class="page" id="page-calc">
   <div class="sec">
     <div class="stitle">&#128663; Vehicle Details</div>
@@ -183,12 +180,8 @@
   </div>
 </div>
 
-<!-- ================================================================
-     PAGE: COMPETITOR COMPARISON ENGINE
-================================================================ -->
+<!-- PAGE: COMPETITOR COMPARISON ENGINE -->
 <div class="page" id="page-compare">
-
-  <!-- Our car -->
   <div class="cpanel ours">
     <div class="cpt ours">&#9989; Our Car</div>
     <div class="f"><label>Make / Model</label><input type="text" id="o-model" placeholder="e.g. Toyota Camry 2.5 Hybrid"></div>
@@ -208,8 +201,6 @@
     </div>
     <div class="f" style="margin-top:.625rem"><label>Extras / Notes</label><textarea id="o-notes" placeholder="e.g. Free tinting, 1-yr insurance, full service records"></textarea></div>
   </div>
-
-  <!-- Competitor car -->
   <div class="cpanel them">
     <div class="cpt them">&#9888;&#65039; Competitor Car</div>
     <div class="f"><label>Make / Model</label><input type="text" id="c2-model" placeholder="e.g. Honda Accord 1.5T"></div>
@@ -229,65 +220,41 @@
     </div>
     <div class="f" style="margin-top:.625rem"><label>Risks / Notes</label><textarea id="c2-notes" placeholder="e.g. No service records, accident history unknown"></textarea></div>
   </div>
-
   <button class="btn bd" id="cmpBtn" onclick="runCompare()">&#9878;&#65039; Compare offers</button>
-
-  <!-- Results -->
   <div id="cmp-results" style="display:none">
     <div class="seg">Score Summary</div>
     <div class="score-row" id="cmp-score-row"></div>
-
     <div class="seg">Head-to-Head Comparison</div>
     <div class="sec" style="padding:.875rem 1rem">
       <div class="chdr">
-        <div class="cion"></div>
-        <div class="clbl">Category</div>
-        <div class="cov">Ours</div>
-        <div class="ctv">Theirs</div>
-        <div class="cwin">Win</div>
+        <div class="cion"></div><div class="clbl">Category</div><div class="cov">Ours</div><div class="ctv">Theirs</div><div class="cwin">Win</div>
       </div>
       <div id="cmp-table"></div>
     </div>
-
     <div class="seg">Overall Value Winner</div>
     <div class="oc" id="cmp-overall">
       <div class="oc-lbl" id="cmp-overall-lbl">Overall winner</div>
       <div class="oc-w" id="cmp-overall-winner"></div>
       <div class="oc-r" id="cmp-overall-reason"></div>
     </div>
-
     <div class="seg">&#9989; Sales Talking Points</div>
     <div id="cmp-talking"></div>
-
     <div class="seg">&#9888;&#65039; Risk Areas to Address</div>
     <div id="cmp-risks"></div>
-
     <div class="seg">If customer says "another dealer is cheaper"</div>
     <div class="cbox"><p id="cmp-cheaper"></p></div>
-
     <div class="seg">WhatsApp Comparison Message</div>
     <div class="msg-wrap">
       <div class="msg-head"><span class="msg-lbl">Ready to send</span><button class="cbtn" id="cp-cmp" onclick="copyMsg('cmp-wa','cp-cmp')">&#128203; Copy</button></div>
       <div class="bub" id="cmp-wa"></div>
     </div>
-
-    <div class="disc"><span style="font-size:14px;flex-shrink:0">&#8505;&#65039;</span><p>Comparison is based only on entered data. Verify all details before advising customers. Prices, COE, depreciation and mileage should be confirmed from official sources.</p></div>
+    <div class="disc"><span style="font-size:14px;flex-shrink:0">&#8505;&#65039;</span><p>Comparison is based only on entered data. Verify all details before advising customers.</p></div>
   </div>
-</div>
-
-<!-- ================================================================
-     PAGE: VEHICLE MATCH ENGINE
-================================================================ -->
+</div><!-- PAGE: VEHICLE MATCH ENGINE -->
 <div class="page" id="page-match">
-
-  <!-- Customer Profile Inputs -->
   <div class="sec">
     <div class="stitle">&#127775; Customer Profile</div>
-
-    <div class="f"><label>Total budget (SGD)</label>
-      <input type="number" id="vm-budget" placeholder="e.g. 120000">
-    </div>
-
+    <div class="f"><label>Total budget (SGD)</label><input type="number" id="vm-budget" placeholder="e.g. 120000"></div>
     <div class="f"><label>Vehicle type preference</label>
       <div class="vm-chip-group" id="vm-type-chips">
         <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Sedan')">Sedan</button>
@@ -299,7 +266,6 @@
         <button class="vm-chip" onclick="vm_toggle(this,'vm-type','Any')">Any / Open</button>
       </div>
     </div>
-
     <div class="f"><label>What matters most? (choose up to 3)</label>
       <div class="vm-chip-group" id="vm-pref-chips">
         <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Brand')">Brand</button>
@@ -312,7 +278,6 @@
         <button class="vm-chip" onclick="vm_multi(this,'vm-pref','Safety')">Safety</button>
       </div>
     </div>
-
     <div class="f"><label>New or used?</label>
       <div class="vm-chip-group" id="vm-condition-chips">
         <button class="vm-chip" onclick="vm_toggle(this,'vm-condition','New')">New</button>
@@ -320,7 +285,6 @@
         <button class="vm-chip" onclick="vm_toggle(this,'vm-condition','Open to Both')">Open to Both</button>
       </div>
     </div>
-
     <div class="f"><label>Family size</label>
       <div class="vm-chip-group" id="vm-family-chips">
         <button class="vm-chip" onclick="vm_toggle(this,'vm-family','1')">1</button>
@@ -330,7 +294,6 @@
         <button class="vm-chip" onclick="vm_toggle(this,'vm-family','5+')">5+</button>
       </div>
     </div>
-
     <div class="f"><label>Daily driving distance</label>
       <div class="vm-chip-group" id="vm-driving-chips">
         <button class="vm-chip" onclick="vm_toggle(this,'vm-driving','Short')">Short (under 30km)</button>
@@ -338,7 +301,6 @@
         <button class="vm-chip" onclick="vm_toggle(this,'vm-driving','Long')">Long (80km+)</button>
       </div>
     </div>
-
     <div class="f"><label>Top priority</label>
       <div class="vm-chip-group" id="vm-priority-chips">
         <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Lowest Monthly Payment')">Lowest Monthly</button>
@@ -349,52 +311,29 @@
         <button class="vm-chip" onclick="vm_toggle(this,'vm-priority','Reliability')">Reliability</button>
       </div>
     </div>
-
-    <div class="f"><label>Specific model in mind? <span class="ot">optional — for alternatives</span></label>
+    <div class="f"><label>Specific model in mind? <span class="ot">optional</span></label>
       <input type="text" id="vm-specific" placeholder="e.g. Honda Vezel">
     </div>
   </div>
-
   <button class="btn bd" id="vm-btn" onclick="runVehicleMatch()">&#127775; Find best match</button>
-
-  <!-- Results -->
   <div id="vm-results" style="display:none">
-
-    <!-- Alternatives (shown if specific model entered) -->
     <div id="vm-alt-section" style="display:none">
       <div class="seg">Similar alternatives to <span id="vm-alt-model-name"></span></div>
       <div id="vm-alt-list"></div>
     </div>
-
-    <!-- Top 5 Recommendations -->
     <div class="seg">&#127775; Top 5 recommended vehicles</div>
     <div id="vm-cards"></div>
-
-    <!-- Sales Talking Points for this customer -->
     <div class="seg">&#128172; Sales talking points for this customer</div>
-    <div class="sec" style="padding:1rem">
-      <ul class="vm-tp-list" id="vm-talking-points"></ul>
-    </div>
-
+    <div class="sec" style="padding:1rem"><ul class="vm-tp-list" id="vm-talking-points"></ul></div>
     <button class="btn bg" id="vm-save-btn" onclick="saveVmMatch()">&#128190; Save match</button>
   </div>
-
-  <!-- Match History -->
   <div class="seg">Match history</div>
-  <div class="sb">
-    <span class="sb-ic">&#128269;</span>
-    <input type="text" id="vm-hist-search" placeholder="Search by profile or car…" oninput="renderVmHistory()">
-  </div>
+  <div class="sb"><span class="sb-ic">&#128269;</span><input type="text" id="vm-hist-search" placeholder="Search by profile or car…" oninput="renderVmHistory()"></div>
   <div id="vm-hist-list"></div>
+</div>
 
-</div><!-- /page-match -->
-
-<!-- ================================================================
-     PAGE: OBJECTION BRAIN
-================================================================ -->
+<!-- PAGE: OBJECTION BRAIN -->
 <div class="page" id="page-objection">
-
-  <!-- Input section -->
   <div class="sec">
     <div class="stitle">&#129504; Objection Brain</div>
     <div class="f"><label>Type customer objection</label>
@@ -415,36 +354,27 @@
       <button class="ob-chip" onclick="ob_selectChip(this,'Other')">Other</button>
     </div>
   </div>
-
   <button class="btn bd" id="ob-btn" onclick="analyzeObjection()">&#129504; Analyze objection</button>
-
-  <!-- Results (hidden until analyzed) -->
   <div id="ob-results" style="display:none">
-
     <div class="seg">1. Real Objection</div>
     <div class="ob-real-card" id="ob-real-card">
       <div class="ob-real-title">What the customer is REALLY worried about</div>
       <div id="ob-real-list"></div>
     </div>
-
     <div class="seg">2. Psychology</div>
     <div class="ob-psych" id="ob-psych">
       <div class="ob-psych-title">&#129504; Why customers say this</div>
       <p id="ob-psych-text"></p>
     </div>
-
     <div class="seg">3. Next Best Question</div>
     <div class="ob-q-card">
       <div class="ob-q-label">Ask this immediately</div>
       <div class="ob-q-text" id="ob-question"></div>
     </div>
-
     <div class="seg">4. What NOT to Say</div>
     <div class="ob-dont-card" id="ob-donts"></div>
-
     <div class="seg">5. Recommended Strategy</div>
     <div class="ob-strat-card" id="ob-strategy"></div>
-
     <div class="seg">6. Closing Chance</div>
     <div class="ob-close-wrap">
       <div class="ob-close-label">Probability of closing after handling this objection</div>
@@ -452,35 +382,20 @@
       <div class="ob-close-bar-bg"><div class="ob-close-bar" id="ob-close-bar" style="width:0%"></div></div>
       <div class="ob-close-note" id="ob-close-note"></div>
     </div>
-
     <button class="btn bg" id="ob-save-btn" onclick="saveToObjLibrary()">&#128190; Save to Objection Library</button>
   </div>
-
-  <!-- Objection Library -->
   <div class="seg">Objection Library</div>
-  <div class="sb">
-    <span class="sb-ic">&#128269;</span>
-    <input type="text" id="obl-search" placeholder="Search saved objections…" oninput="renderObjLibrary()">
-  </div>
+  <div class="sb"><span class="sb-ic">&#128269;</span><input type="text" id="obl-search" placeholder="Search saved objections…" oninput="renderObjLibrary()"></div>
   <div id="obl-list"></div>
+</div>
 
-</div><!-- /page-objection -->
-
-<!-- ================================================================
-     PAGE: APEX MEMORY ENGINE
-================================================================ -->
+<!-- PAGE: APEX MEMORY ENGINE -->
 <div class="page" id="page-memory">
-
-  <!-- Empty state shown when no data -->
   <div class="mem-empty" id="mem-empty-state">
     <div style="font-size:48px">&#129504;</div>
-    <p>Apex Memory is empty.<br>Complete deals in the Deal Coach and Live Copilot<br>to build your learning database.</p>
+    <p>No deals yet.<br>Start your first customer conversation to begin building your Apex Memory.</p>
   </div>
-
-  <!-- Dashboard (shown when data exists) -->
   <div id="mem-dashboard" style="display:none">
-
-    <!-- KPI grid -->
     <div class="seg">Deal performance</div>
     <div class="mem-kpi-grid">
       <div class="mem-kpi accent"><div class="mem-kpi-val" id="mem-total">0</div><div class="mem-kpi-lbl">Total deals</div></div>
@@ -488,8 +403,6 @@
       <div class="mem-kpi red"><div class="mem-kpi-val" id="mem-lost">0</div><div class="mem-kpi-lbl">Lost</div></div>
       <div class="mem-kpi blue"><div class="mem-kpi-val" id="mem-rate">0%</div><div class="mem-kpi-lbl">Close rate</div></div>
     </div>
-
-    <!-- Wide KPIs -->
     <div class="seg">Patterns</div>
     <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common objection</span><span class="mem-wide-val" id="mem-top-obj">—</span></div>
     <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most recommended vehicle</span><span class="mem-wide-val" id="mem-top-car">—</span></div>
@@ -497,16 +410,10 @@
     <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common buyer type</span><span class="mem-wide-val" id="mem-top-type">—</span></div>
     <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common buying stage</span><span class="mem-wide-val" id="mem-top-stage">—</span></div>
     <div class="mem-wide-kpi"><span class="mem-wide-lbl">Most common trust level</span><span class="mem-wide-val" id="mem-top-trust">—</span></div>
-
-    <!-- AI Insights -->
     <div class="seg">&#129504; AI insights</div>
     <div id="mem-insights"></div>
-
-    <!-- Success strategies -->
     <div class="seg">&#127942; Top performing strategies</div>
     <div id="mem-strategies"></div>
-
-    <!-- Similar customer lookup (live) -->
     <div class="seg">&#128269; Similar customer lookup</div>
     <div class="sec" style="padding:1rem">
       <div class="f"><label>Paste objection or customer note</label>
@@ -514,23 +421,23 @@
       </div>
       <div id="mem-lookup-result" style="margin-top:.75rem"></div>
     </div>
-
-    <!-- Export / Import / Reset -->
     <div class="seg">Data</div>
     <div class="mem-action-row">
-      <button class="mem-action-btn" onclick="mem_export()">&#8595; Export JSON</button>
-      <button class="mem-action-btn" onclick="el('mem-import-file').click()">&#8593; Import JSON</button>
+      <div style="flex:1">
+        <button class="mem-action-btn" style="width:100%" onclick="mem_export()">&#128190; Backup Apex Memory</button>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;text-align:center">Backup saves your customer memory to a file.</div>
+      </div>
+      <div style="flex:1">
+        <button class="mem-action-btn" style="width:100%" onclick="el('mem-import-file').click()">&#128194; Restore Apex Memory</button>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;text-align:center">Restore loads a previous Apex Memory backup.</div>
+      </div>
       <input type="file" id="mem-import-file" accept=".json" style="display:none" onchange="mem_import(this)">
     </div>
     <button class="mem-action-btn danger" style="width:100%;margin-bottom:.875rem" onclick="mem_reset()">&#128465; Clear Apex Memory</button>
+  </div>
+</div>
 
-  </div><!-- /mem-dashboard -->
-
-</div><!-- /page-memory -->
-
-<!-- ================================================================
-     PAGE: CUSTOMER HISTORY
-================================================================ -->
+<!-- PAGE: CUSTOMER HISTORY -->
 <div class="page" id="page-history">
   <div id="hv-list">
     <div id="stats-row" class="str" style="display:none">
@@ -538,10 +445,7 @@
       <div class="stc"><div class="stv" id="stat-week">0</div><div class="stl">This week</div></div>
       <div class="stc"><div class="stv" id="stat-high">0</div><div class="stl">High risk</div></div>
     </div>
-    <div class="sb">
-      <span class="sb-ic">&#128269;</span>
-      <input type="text" id="search-input" placeholder="Search name, car or objection…" oninput="renderHistory()">
-    </div>
+    <div class="sb"><span class="sb-ic">&#128269;</span><input type="text" id="search-input" placeholder="Search name, car or objection…" oninput="renderHistory()"></div>
     <div id="history-list"></div>
   </div>
   <div id="hv-detail" style="display:none">
@@ -550,12 +454,8 @@
   </div>
 </div>
 
-<!-- ================================================================
-     PAGE: LIVE SALES COPILOT
-================================================================ -->
+<!-- PAGE: LIVE SALES COPILOT -->
 <div class="page" id="page-copilot">
-
-  <!-- START SCREEN -->
   <div class="cp-start-screen" id="cp-start">
     <div class="cp-start-icon">&#9654;&#65039;</div>
     <div class="cp-start-title">Live Sales Copilot</div>
@@ -564,56 +464,28 @@
       <span style="font-size:20px">&#9654;</span> Start live deal
     </button>
     <div style="margin-top:1.25rem;font-size:12px;color:var(--muted)">Your notes stay private on this device.</div>
+    <button onclick="cp_startNewCustomer()" style="margin-top:1.25rem;background:var(--s2);border:1px solid var(--bd);border-radius:11px;padding:11px 20px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px">
+      &#129529; Start New Customer
+    </button>
     <button onclick="cp_testAPI()" style="margin-top:.875rem;background:none;border:1px solid var(--bd);border-radius:9px;padding:8px 16px;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit">&#128312; Test API connection</button>
     <div id="cp-api-test-result" style="margin-top:.625rem;font-size:12px;text-align:center"></div>
   </div>
-
-  <!-- LIVE SCREEN -->
   <div class="cp-live-screen" id="cp-live">
-
-    <!-- Header with timer -->
     <div class="cp-live-header">
-      <div class="cp-live-title">&#128308; Live — deal in progress</div>
+      <div class="cp-live-title" id="cp-live-title">&#128308; Live — deal in progress</div>
       <div class="cp-timer" id="cp-timer">00:00</div>
     </div>
-
-    <!-- Status Row -->
     <div class="cp-status-row">
-      <div class="cp-stat">
-        <div class="cp-stat-icon" id="cp-mood-icon">&#128528;</div>
-        <div class="cp-stat-val" id="cp-mood-val">–</div>
-        <div class="cp-stat-lbl">Mood</div>
-      </div>
-      <div class="cp-stat">
-        <div class="cp-stat-icon">&#127919;</div>
-        <div class="cp-stat-val" id="cp-intent-val">–</div>
-        <div class="cp-stat-lbl">Intent</div>
-      </div>
-      <div class="cp-stat">
-        <div class="cp-stat-icon">&#129309;</div>
-        <div class="cp-stat-val" id="cp-trust-val">–</div>
-        <div class="cp-stat-lbl">Trust</div>
-      </div>
-      <div class="cp-stat">
-        <div class="cp-stat-icon">&#9888;&#65039;</div>
-        <div class="cp-stat-val" id="cp-risk-val">–</div>
-        <div class="cp-stat-lbl">Risk</div>
-      </div>
+      <div class="cp-stat"><div class="cp-stat-icon" id="cp-mood-icon">&#128528;</div><div class="cp-stat-val" id="cp-mood-val">–</div><div class="cp-stat-lbl">Mood</div></div>
+      <div class="cp-stat"><div class="cp-stat-icon">&#127919;</div><div class="cp-stat-val" id="cp-intent-val">–</div><div class="cp-stat-lbl">Intent</div></div>
+      <div class="cp-stat"><div class="cp-stat-icon">&#129309;</div><div class="cp-stat-val" id="cp-trust-val">–</div><div class="cp-stat-lbl">Trust</div></div>
+      <div class="cp-stat"><div class="cp-stat-icon">&#9888;&#65039;</div><div class="cp-stat-val" id="cp-risk-val">–</div><div class="cp-stat-lbl">Risk</div></div>
     </div>
-
-    <!-- Buying intent bar -->
     <div class="cp-intent-bar" id="cp-intent-bar" style="display:none">
-      <div class="cp-intent-row">
-        <span class="cp-intent-lbl">Buying intent</span>
-        <span class="cp-intent-val" id="cp-intent-pct">0%</span>
-      </div>
+      <div class="cp-intent-row"><span class="cp-intent-lbl">Buying intent</span><span class="cp-intent-val" id="cp-intent-pct">0%</span></div>
       <div class="cp-intent-bg"><div class="cp-intent-fill" id="cp-intent-fill" style="width:0%"></div></div>
     </div>
-
-    <!-- Emotion tags -->
     <div class="cp-emotion-wrap" id="cp-emotion-wrap" style="display:none"></div>
-
-    <!-- Live coaching panel -->
     <div class="cp-coaching" id="cp-coaching" style="display:none">
       <div class="cp-coaching-row say">
         <div class="cp-coaching-icon">&#128161;</div>
@@ -628,8 +500,6 @@
         <div><div class="cp-coaching-label">Next action</div><div class="cp-coaching-text" id="cp-action"></div></div>
       </div>
     </div>
-
-    <!-- Best Next Question (Constitution principle 3 & 7) -->
     <div class="cp-coaching" id="cp-question-card" style="display:none;margin-top:.625rem;border-color:var(--bbd)">
       <div class="cp-coaching-row" style="background:var(--bbg)">
         <div class="cp-coaching-icon">&#10067;</div>
@@ -640,24 +510,14 @@
         </div>
       </div>
     </div>
-
-    <!-- Conversation Stage badge -->
     <div id="cp-stage-wrap" style="display:none;margin-top:.625rem;margin-bottom:.25rem">
       <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Conversation stage&#8194;</span>
       <span id="cp-stage-badge" style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--s2);color:var(--text)"></span>
     </div>
-
-    <!-- Notes input -->
     <div class="seg" style="margin-top:.25rem">Your live notes</div>
     <textarea class="cp-notes" id="cp-notes" placeholder="Type as you talk&#10;&#10;e.g.&#10;Customer says monthly too high&#10;Likes Toyota&#10;Wife prefers SUV&#10;Has Honda Fit trade-in"></textarea>
-    <button class="cp-update-btn" id="cp-update-btn" onclick="cp_update()">
-      &#129504; Update — analyze notes
-    </button>
-
-    <!-- End deal -->
+    <button class="cp-update-btn" id="cp-update-btn" onclick="cp_update()">&#129504; Update — analyze notes</button>
     <button class="cp-end-btn" onclick="cp_showOutcome()">&#9632; Finish deal</button>
-
-    <!-- Outcome sheet -->
     <div class="cp-outcome-sheet" id="cp-outcome-sheet">
       <div class="cp-outcome-title">How did it go?</div>
       <div class="cp-outcome-btns">
@@ -667,27 +527,17 @@
         <button class="cp-outcome-btn cancel" onclick="cp_endDeal('cancel')">&#10006; Cancelled</button>
       </div>
     </div>
-
-    <!-- Timeline -->
     <div class="cp-timeline" id="cp-timeline">
       <div class="cp-tl-title">&#128336; Deal timeline</div>
       <div id="cp-tl-items"></div>
       <button class="btn bd" style="margin-top:.875rem;margin-bottom:0" onclick="cp_backToStart()">&#43; Start new deal</button>
     </div>
-
-  </div><!-- /cp-live -->
-
-  <!-- Deal History -->
-  <div class="seg" id="cp-hist-seg">Live deal history</div>
-  <div class="sb">
-    <span class="sb-ic">&#128269;</span>
-    <input type="text" id="cp-hist-search" placeholder="Search deals…" oninput="cp_renderHistory()">
   </div>
+  <div class="seg" id="cp-hist-seg">Live deal history</div>
+  <div class="sb"><span class="sb-ic">&#128269;</span><input type="text" id="cp-hist-search" placeholder="Search deals…" oninput="cp_renderHistory()"></div>
   <div id="cp-hist-list"></div>
+</div>
 
-</div><!-- /page-copilot -->
-
-<!-- Replay Modal -->
 <div class="cp-replay" id="cp-replay">
   <div class="cp-replay-inner">
     <button class="cp-replay-close" onclick="cp_closeReplay()">&#10005;</button>
@@ -697,5 +547,32 @@
 
 </div><!-- .app -->
 <script src="/js/app.js"></script>
+
+<div id="deal-saved-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--surface);border-radius:16px;padding:1.5rem 1.25rem;max-width:380px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+    <div style="text-align:center;font-size:40px;margin-bottom:.75rem">&#9989;</div>
+    <div style="font-size:17px;font-weight:700;color:var(--text);text-align:center;margin-bottom:.375rem">Deal saved successfully.</div>
+    <div style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:1.25rem">What would you like to do?</div>
+    <button onclick="modal_startNew()" style="width:100%;padding:13px;background:#1a1a2e;color:#fff;border:none;border-radius:11px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:.625rem">&#129529; Start New Customer</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <button onclick="modal_continue()" style="padding:11px;background:var(--s2);color:var(--text);border:1px solid var(--bd);border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#9997;&#65039; Continue This Customer</button>
+      <button onclick="modal_viewMemory()" style="padding:11px;background:var(--s2);color:var(--text);border:1px solid var(--bd);border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#129504; View Memory</button>
+    </div>
+  </div>
+</div>
+
+<div id="reflection-modal" style="display:none;position:fixed;inset:0;z-index:9001;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--surface);border-radius:16px;padding:1.5rem 1.25rem;max-width:380px;width:100%">
+    <div style="font-size:14px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">&#129488; Reflection</div>
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:.375rem">What is the biggest lesson from this customer?</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:.875rem">Optional — tap Skip to continue.</div>
+    <textarea id="reflection-input" placeholder="e.g. Should have asked about the spouse earlier..." style="width:100%;min-height:90px;font-size:14px;font-family:inherit;color:var(--text);background:var(--s2);border:1px solid var(--bd);border-radius:9px;padding:10px;resize:none;outline:none;margin-bottom:.875rem"></textarea>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <button onclick="reflection_skip()" style="padding:11px;background:var(--s2);color:var(--muted);border:1px solid var(--bd);border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Skip</button>
+      <button onclick="reflection_save()" style="padding:11px;background:#1a1a2e;color:#fff;border:none;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">&#128190; Save Reflection</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
