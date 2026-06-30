@@ -104,6 +104,7 @@ function renderHome() {
 
 let _liveAnalysis = null; // last AI/local analysis result
 let _allNotesThisSession = []; // accumulated notes across all Update taps in this conversation
+let _calcOpen = false;
 
 function startNewCustomer() {
   const draft = loadDraft();
@@ -125,6 +126,13 @@ function startNewCustomer() {
   el('live-title').textContent = 'New customer';
   _liveAnalysis = null;
   _allNotesThisSession = [];
+  ['calc-price','calc-dp','calc-loan'].forEach(id => { el(id).value = ''; });
+  el('calc-tenure').value = '7';
+  el('calc-rate').value = '2.8';
+  el('calc-results').style.display = 'none';
+  el('calc-panel').style.display = 'none';
+  el('calc-toggle').classList.remove('open');
+  _calcOpen = false;
   showToast('Ready for a new customer');
 }
 
@@ -198,6 +206,14 @@ function toggleMoreAdvice() {
   t.classList.toggle('open', !open);
 }
 
+function clearNotesOnly() {
+  if (!el('live-notes').value.trim()) return;
+  if (!confirm('Clear notes? Customer name and car will be kept.')) return;
+  el('live-notes').value = '';
+  liveSaveDraft();
+  showToast('Notes cleared');
+}
+
 // ── Finish Deal ──
 function openFinishSheet() {
   const name  = el('live-name').value.trim();
@@ -254,6 +270,54 @@ function finishDeal(outcome) {
 }
 
 // ════════════════════════════════════════════════════════════════
+// FINANCE CALCULATOR — Singapore car loan instalment estimator
+// Formula (as specified):
+//   Total months    = loan tenure (years) × 12
+//   Total interest  = Loan amount × interest rate × loan tenure
+//   Monthly instalment = (Loan amount + total interest) / total months
+// ════════════════════════════════════════════════════════════════
+
+function toggleCalculator() {
+  const panel = el('calc-panel');
+  const toggle = el('calc-toggle');
+  _calcOpen = panel.style.display === 'none';
+  panel.style.display = _calcOpen ? '' : 'none';
+  toggle.classList.toggle('open', _calcOpen);
+}
+
+function runCalculator() {
+  const price   = parseFloat(el('calc-price').value)  || 0;
+  const dp      = parseFloat(el('calc-dp').value)      || 0;
+  let   loan    = parseFloat(el('calc-loan').value);
+  const tenure  = parseFloat(el('calc-tenure').value)  || 0;
+  const rate    = parseFloat(el('calc-rate').value)    || 0;
+
+  // Auto-calculate loan amount from price − downpayment, unless user has typed their own loan amount
+  if (isNaN(loan) || el('calc-loan').value === '') {
+    loan = Math.max(0, price - dp);
+    if (price > 0) el('calc-loan').value = loan;
+  }
+
+  if (!loan || !tenure || rate < 0) {
+    el('calc-results').style.display = 'none';
+    return;
+  }
+
+  const totalMonths   = tenure * 12;
+  const totalInterest = loan * (rate / 100) * tenure;
+  const monthly        = (loan + totalInterest) / totalMonths;
+  const totalRepay      = loan + totalInterest;
+
+  el('calc-monthly').textContent        = 'SGD ' + Math.round(monthly).toLocaleString('en-SG');
+  el('calc-total-interest').textContent = 'SGD ' + Math.round(totalInterest).toLocaleString('en-SG');
+  el('calc-total-repay').textContent    = 'SGD ' + Math.round(totalRepay).toLocaleString('en-SG');
+  el('calc-results').style.display = '';
+
+  // Apex coaching note — always shown alongside the result as a standing reminder
+  el('calc-coach-note').style.display = '';
+}
+
+// ════════════════════════════════════════════════════════════════
 // LOCAL FALLBACK ANALYSIS — used if GPT API is unavailable
 // ════════════════════════════════════════════════════════════════
 
@@ -302,24 +366,36 @@ function localAnalyse(notesRaw) {
   else if (n.includes('compar')) stage = 'Comparing';
   else if (intent >= 60) stage = 'Trust Building';
 
+  // ── Rejects features, focuses on outlook / design / price instead ──
+  // Common in Singapore: customer dismisses technical specs, cares about looks and price only.
+  const dismissesFeatures = (n.includes('not interested in') || n.includes('don\'t care about') || n.includes('skip the') || n.includes('don\'t need')) &&
+                             (n.includes('feature') || n.includes('spec') || n.includes('tech'));
+  const focusesOnOutlook  = n.includes('design') || n.includes('outlook') || n.includes('look') || n.includes('color') || n.includes('colour') || n.includes('exterior') || n.includes('style');
+  const focusesOnPriceOnly = (n.includes('just want') || n.includes('only care about') || n.includes('bottom line')) && (n.includes('price') || n.includes('cheap'));
+  const isAestheticPriceBuyer = dismissesFeatures || focusesOnOutlook || focusesOnPriceOnly;
+
   let bestQuestion = 'What would need to be true for you to feel completely comfortable deciding today?';
   if (stage === 'Discovery')      bestQuestion = 'What is the one thing your current car does not give you that you are looking for now?';
   if (stage === 'Trust Building') bestQuestion = 'What would make you feel fully confident this is the right decision?';
   if (stage === 'Comparing')      bestQuestion = 'Out of everything you have seen, what is still missing?';
   if (stage === 'Objection')      bestQuestion = n.includes('wife') ? 'What would your partner need to see to feel comfortable?' : 'What specifically would need to change here?';
   if (stage === 'Closing')        bestQuestion = 'Is there anything that would stop you from moving forward today?';
+  if (isAestheticPriceBuyer)      bestQuestion = 'What colour or look would feel most like "you" when you picture driving this every day?';
 
   let say = 'Tell me more about what matters most to you here.';
   if (n.includes('monthly') || n.includes('expensive')) say = 'Let me show you a few finance options side by side.';
   if (n.includes('wife') || n.includes('spouse'))        say = 'Would it help if you both came in together?';
+  if (isAestheticPriceBuyer)                              say = 'Let\'s focus on how this looks and what it costs you monthly — I won\'t walk you through every spec.';
 
   let warn = "Don't fill the silence — let them think.";
   if (n.includes('monthly') || n.includes('expensive')) warn = "Don't cut the price first — try restructuring the loan.";
   if (n.includes('compar'))                              warn = "Don't criticise competitors.";
+  if (isAestheticPriceBuyer)                              warn = "Don't keep pitching technical features — they've told you that's not what moves them.";
 
   let action = 'Listen actively for the next two minutes.';
   if (n.includes('test drive') || intent >= 65) action = 'Book the test drive now.';
   if (n.includes('wife'))                        action = 'Offer a joint visit this weekend.';
+  if (isAestheticPriceBuyer)                      action = 'Show colour options and the monthly instalment number — skip the spec sheet.';
 
   return { mood: 'Neutral', moodIcon: '😐', intent, trust, risk, stage, bestQuestion, say, warn, action, emotions: [] };
 }
