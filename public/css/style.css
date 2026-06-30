@@ -84,6 +84,21 @@ body{
 .f input:focus,.f textarea:focus{border-color:var(--accent)}
 .f textarea{min-height:110px;resize:none;line-height:1.6}
 
+.f-label-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.f-label-row label{margin-bottom:0}
+.clear-notes-btn{background:none;border:none;color:var(--blue);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:2px 4px}
+.f-hint{font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;margin-left:4px}
+
+/* ── Finance calculator ── */
+.calc-result-row{display:flex;align-items:center;justify-content:space-between;padding:.75rem 0;border-bottom:1px solid var(--bd)}
+.calc-result-row:last-of-type{border-bottom:none}
+.calc-result-row.highlight{background:var(--bbg);border-radius:12px;padding:.875rem 1rem;border-bottom:none;margin-bottom:.5rem}
+.calc-result-lbl{font-size:13px;color:var(--muted);font-weight:600}
+.calc-result-row.highlight .calc-result-lbl{color:var(--blue)}
+.calc-result-val{font-size:15px;font-weight:700;color:var(--text)}
+.calc-result-val.big{font-size:22px;color:var(--blue)}
+.calc-coach-note{background:var(--abg);border:1px solid var(--abd);border-radius:12px;padding:.875rem 1rem;margin-top:.75rem;font-size:13px;color:var(--amb);line-height:1.5}
+
 .status-row{display:flex;gap:8px;margin:1rem 0}
 .status-pill{flex:1;background:var(--surface);border:1px solid var(--bd);border-radius:12px;padding:10px 8px;text-align:center}
 .status-pill-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
