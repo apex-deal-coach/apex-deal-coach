@@ -52,6 +52,7 @@ function showPage(p) {
 function updateBadge() {
   const n = loadDB().length;
   const b = el('hist-count');
+  if (!b) return;
   b.textContent = n;
   b.style.display = n ? '' : 'none';
 }
@@ -303,7 +304,7 @@ function analyze() {
     _lastInput  = d;
     _lastResult = { ...r, profile: prof, concerns, questions, warnings, strategy };
     const sb = el('saveBtn');
-    sb.innerHTML = '&#128190; Save customer'; sb.classList.remove('saved'); sb.disabled = false;
+    sb.innerHTML = '&#128190; Save Deal'; sb.classList.remove('saved'); sb.disabled = false;
 
     btn.innerHTML = '&#129504; Analyze deal'; btn.classList.remove('loading');
     el('report').style.display = '';
@@ -322,9 +323,9 @@ function saveCustomer() {
   });
   saveDB(all);
   const sb = el('saveBtn');
-  sb.innerHTML = '&#10003; Saved!'; sb.classList.add('saved'); sb.disabled = true;
-  showToast('Customer saved'); updateBadge();
-  // Auto-record to Memory Engine (no duplicate function needed)
+  sb.innerHTML = '&#10003; Deal Saved!'; sb.classList.add('saved'); sb.disabled = true;
+  updateBadge();
+  // Auto-record to Memory Engine
   const prof = _lastResult.profile || {};
   mem_record({
     customerType: prof.type  || _lastInput.motivation || '',
@@ -338,6 +339,10 @@ function saveCustomer() {
     result:       'pending',
     src:          'coach'
   });
+  // Increment today's counter and show success modal
+  sessionIncrement();
+  showToast('\u2705 Deal saved to Apex Memory');
+  showDealSavedModal();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -665,7 +670,7 @@ function renderHistory() {
 
   const list = el('history-list');
   if (filtered.length === 0) {
-    list.innerHTML = `<div class="es"><div style="font-size:40px">👥</div><p>${all.length === 0 ? 'No saved customers yet.<br>Analyze a deal and tap Save customer.' : 'No results match your search.'}</p></div>`;
+    list.innerHTML = `<div class="es"><div style="font-size:40px">👥</div><p>${all.length === 0 ? 'No deals yet.<br>Start your first customer conversation to begin building your Apex Memory.' : 'No results match your search.'}</p></div>`;
     return;
   }
 
@@ -1589,11 +1594,14 @@ function saveToObjLibrary() {
 
 /* ── Render Objection Library ── */
 function renderObjLibrary() {
-  const q   = (el('obl-search').value || '').toLowerCase();
+  const searchEl = el('obl-search');
+  if (!searchEl) return;
+  const q   = (searchEl.value || '').toLowerCase();
   const lib = loadOBL();
   const filtered = q ? lib.filter(e => e.objection.toLowerCase().includes(q) || e.key.includes(q)) : lib;
 
   const wrap = el('obl-list');
+  if (!wrap) return;
   if (filtered.length === 0) {
     wrap.innerHTML = `<div class="es" style="padding:1.5rem 0"><div style="font-size:32px">&#128214;</div><p>${lib.length === 0 ? 'No saved objections yet. Analyze one and tap Save.' : 'No results match your search.'}</p></div>`;
     return;
@@ -1662,6 +1670,10 @@ function cp_timeStr() {
 function cp_startDeal() {
   _cp = { active:true, startTime:Date.now(), timerInterval:null, notes:'', allNotes:[], timeline:[], updates:0, lastAnalysis:null };
   _cp.timeline.push({ time: cp_timeStr(), elapsed: '00:00', text: 'Deal started', type: 'start' });
+  // Update live title with today's customer number
+  const todayNum = sessionGetCount() + 1;
+  const titleEl = el('cp-live-title');
+  if (titleEl) titleEl.textContent = '\u{1F534} Customer #' + todayNum + ' Today';
 
   // Show live screen, hide start screen
   el('cp-start').style.display  = 'none';
@@ -2014,21 +2026,8 @@ function cp_endDeal(outcome) {
   all.push(record);
   cp_saveHistory(all);
 
-  // Render timeline
-  el('cp-tl-items').innerHTML = _cp.timeline.map(t =>
-    `<div class="cp-tl-item">
-      <div class="cp-tl-dot ${t.type === 'won' ? 'won' : t.type === 'lost' ? 'lost' : t.type === 'think' ? 'think' : ''}"></div>
-      <div class="cp-tl-time">${t.time}</div>
-      <div class="cp-tl-text">${t.text}</div>
-    </div>`
-  ).join('');
-
-  // Hide outcome sheet, show timeline
+  // Timeline is now shown after the reflection modal (see cp_showTimeline)
   el('cp-outcome-sheet').style.display = 'none';
-  el('cp-timeline').style.display = '';
-  el('cp-update-btn').style.display = 'none';
-  el('cp-end-btn').style.display = 'none';
-  el('cp-timeline').scrollIntoView({ behavior:'smooth', block:'start' });
 
   // Auto-record to Memory Engine
   if (_cp.lastAnalysis) {
@@ -2047,21 +2046,42 @@ function cp_endDeal(outcome) {
   }
 
   showToast('Deal saved to history');
+  sessionIncrement();
   cp_renderHistory();
+  // Show reflection modal before showing timeline
+  _cp._pendingOutcome = outcome;
+  el('reflection-input').value = '';
+  const rm = el('reflection-modal');
+  if (rm) { rm.style.display = 'flex'; }
 }
 
 function cp_backToStart() {
   clearInterval(_cp.timerInterval);
-  _cp.active = false;
-  el('cp-live').style.display  = 'none';
-  el('cp-start').style.display = 'flex';
-  el('cp-update-btn').style.display  = '';
-  el('cp-end-btn').style.display     = '';
-  el('cp-timeline').style.display    = 'none';
+  _cp = { active:false, startTime:null, timerInterval:null, notes:'', allNotes:[], timeline:[], updates:0, lastAnalysis:null };
+  // Reset all visible copilot UI
+  el('cp-live').style.display          = 'none';
+  el('cp-start').style.display         = 'flex';
+  el('cp-notes').value                 = '';
+  el('cp-update-btn').style.display    = '';
+  el('cp-end-btn').style.display       = '';
+  el('cp-timeline').style.display      = 'none';
   el('cp-outcome-sheet').style.display = 'none';
-  el('cp-coaching').style.display     = 'none';
-  el('cp-intent-bar').style.display   = 'none';
-  el('cp-emotion-wrap').style.display = 'none';
+  el('cp-coaching').style.display      = 'none';
+  el('cp-intent-bar').style.display    = 'none';
+  el('cp-emotion-wrap').style.display  = 'none';
+  el('cp-question-card').style.display = 'none';
+  el('cp-stage-wrap').style.display    = 'none';
+  // Reset status card values
+  ['cp-mood-icon','cp-mood-val','cp-intent-val','cp-trust-val','cp-risk-val'].forEach(id => {
+    const e = el(id);
+    if (e) e.textContent = id === 'cp-mood-icon' ? '\u{1F610}' : '\u2013';
+  });
+  el('cp-intent-pct').textContent   = '0%';
+  el('cp-intent-fill').style.width  = '0%';
+  el('cp-timer').textContent        = '00:00';
+  // Reset live title
+  const titleEl = el('cp-live-title');
+  if (titleEl) titleEl.textContent = '\u{1F534} Live \u2014 deal in progress';
 }
 
 function cp_renderHistory() {
@@ -2599,6 +2619,154 @@ function cp_testAPI() {
   });
 }
 
+
+// ════════════════════════════════════════════════════════════════
+// SESSION COUNTER — tracks deals saved today, resets daily
+// ════════════════════════════════════════════════════════════════
+
+const SESSION_KEY = 'apex_session_v1';
+
+function sessionGetCount() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+    const today = new Date().toDateString();
+    if (raw.date !== today) return 0;
+    return raw.count || 0;
+  } catch(e) { return 0; }
+}
+
+function sessionIncrement() {
+  try {
+    const today = new Date().toDateString();
+    const count = sessionGetCount() + 1;
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ date: today, count }));
+    updateTodayCounter();
+  } catch(e) {}
+}
+
+function updateTodayCounter() {
+  const el_today = el('today-count');
+  if (el_today) el_today.textContent = sessionGetCount();
+}
+
+// ════════════════════════════════════════════════════════════════
+// DEAL SAVED MODAL — appears after saveCustomer() succeeds
+// ════════════════════════════════════════════════════════════════
+
+function showDealSavedModal() {
+  const m = el('deal-saved-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function hideDealSavedModal() {
+  const m = el('deal-saved-modal');
+  if (m) m.style.display = 'none';
+}
+
+// Modal button: Start New Customer
+function modal_startNew() {
+  hideDealSavedModal();
+  // Reset deal coach form and results
+  cp_startNewCustomer_coach();
+}
+
+// Modal button: Continue This Customer
+function modal_continue() {
+  hideDealSavedModal();
+  // Just close — current state stays intact
+}
+
+// Modal button: View Memory
+function modal_viewMemory() {
+  hideDealSavedModal();
+  showPage('memory');
+}
+
+// Reset the coach form for a fresh customer (coach tab)
+function cp_startNewCustomer_coach() {
+  // Clear all input fields
+  ['name','motivation','car','budget','dp','monthly','tenure','tradein',
+   'objection','showrooms','notes','timeline'].forEach(id => {
+    const e = el(id);
+    if (!e) return;
+    if (e.tagName === 'SELECT') e.value = '';
+    else e.value = '';
+  });
+  // Hide results
+  const report = el('report');
+  if (report) report.style.display = 'none';
+  // Reset save button
+  const sb = el('saveBtn');
+  if (sb) { sb.innerHTML = '&#128190; Save Deal'; sb.classList.remove('saved'); sb.disabled = false; }
+  // Reset internal state
+  _lastInput = null; _lastResult = null;
+  // Scroll back to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  showPage('coach');
+  showToast('Ready for next customer');
+}
+
+// ════════════════════════════════════════════════════════════════
+// START NEW CUSTOMER — copilot tab button + confirmation guard
+// ════════════════════════════════════════════════════════════════
+
+function cp_startNewCustomer() {
+  // Check if there are unsaved notes
+  const hasNotes = _cp.active && _cp.allNotes.length > 0;
+  if (hasNotes) {
+    if (!confirm('Discard current conversation?\nThis will clear all notes and AI suggestions.\nSaved deals are NOT affected.')) {
+      return; // user cancelled
+    }
+  }
+  cp_backToStart();
+  showToast('Ready for next customer');
+}
+
+// ════════════════════════════════════════════════════════════════
+// REFLECTION MODAL — save a lesson learned after finishing a deal
+// ════════════════════════════════════════════════════════════════
+
+let _pendingReflectionDealId = null;
+
+function reflection_skip() {
+  const rm = el('reflection-modal');
+  if (rm) rm.style.display = 'none';
+  cp_showTimeline();
+}
+
+function reflection_save() {
+  const text = (el('reflection-input').value || '').trim();
+  if (text) {
+    // Attach reflection to the most recently saved copilot deal
+    try {
+      const all = cp_loadHistory();
+      if (all.length > 0) {
+        all[all.length - 1].reflection = text;
+        cp_saveHistory(all);
+      }
+    } catch(e) {}
+    showToast('Reflection saved');
+  }
+  const rm = el('reflection-modal');
+  if (rm) rm.style.display = 'none';
+  cp_showTimeline();
+}
+
+// Show the timeline after reflection is handled
+function cp_showTimeline() {
+  el('cp-tl-items').innerHTML = _cp.timeline.map(t =>
+    '<div class="cp-tl-item">' +
+    '<div class="cp-tl-dot ' + (t.type === 'won' ? 'won' : t.type === 'lost' ? 'lost' : t.type === 'think' ? 'think' : '') + '"></div>' +
+    '<div class="cp-tl-time">' + t.time + '</div>' +
+    '<div class="cp-tl-text">' + t.text + '</div>' +
+    '</div>'
+  ).join('');
+  el('cp-timeline').style.display      = '';
+  el('cp-update-btn').style.display    = 'none';
+  el('cp-end-btn').style.display       = 'none';
+  el('cp-timeline').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // ════════════════════════════════════════════════════════════════
 // SECTION 11: INIT
 // ════════════════════════════════════════════════════════════════
@@ -2607,3 +2775,4 @@ renderObjLibrary();
 renderVmHistory();
 cp_renderHistory();
 mem_harvest(); // pull in any existing data on first load
+updateTodayCounter(); // show today's deal count
