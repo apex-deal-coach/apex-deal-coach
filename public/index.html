@@ -45,7 +45,8 @@
   <div class="f"><label>Customer name</label><input type="text" id="live-name" placeholder="e.g. Mr Tan" oninput="liveSaveDraft()"></div>
   <div class="f"><label>Interested car</label><input type="text" id="live-car" placeholder="e.g. Toyota Camry" oninput="liveSaveDraft()"></div>
 
-  <div class="f"><label>Notes</label>
+  <div class="f">
+    <div class="f-label-row"><label>Notes</label><button class="clear-notes-btn" onclick="clearNotesOnly()">Clear Notes</button></div>
     <textarea id="live-notes" placeholder="Type what the customer says, as you talk..." oninput="liveSaveDraft()"></textarea>
   </div>
 
@@ -85,6 +86,36 @@
       <div class="status-pill"><div class="status-pill-lbl">Risk</div><div class="status-pill-val" id="live-risk">–</div></div>
     </div>
 
+  </div>
+
+  <button class="more-toggle" id="calc-toggle" onclick="toggleCalculator()">
+    <span>&#128176; Finance calculator</span><span class="more-toggle-arrow">&#9662;</span>
+  </button>
+
+  <div id="calc-panel" style="display:none">
+    <div class="f"><label>Vehicle price (SGD)</label><input type="number" id="calc-price" placeholder="e.g. 120000" inputmode="numeric" oninput="runCalculator()"></div>
+    <div class="f"><label>Downpayment (SGD)</label><input type="number" id="calc-dp" placeholder="e.g. 30000" inputmode="numeric" oninput="runCalculator()"></div>
+    <div class="f"><label>Loan amount (SGD) <span class="f-hint">auto-calculated</span></label><input type="number" id="calc-loan" placeholder="Vehicle price − downpayment" inputmode="numeric" oninput="runCalculator()"></div>
+    <div class="f"><label>Loan tenure (years)</label><input type="number" id="calc-tenure" placeholder="e.g. 7" value="7" min="1" max="10" inputmode="numeric" oninput="runCalculator()"></div>
+    <div class="f"><label>Interest rate (% p.a.)</label><input type="number" id="calc-rate" placeholder="e.g. 2.8" value="2.8" step="0.1" inputmode="decimal" oninput="runCalculator()"></div>
+
+    <div id="calc-results" style="display:none">
+      <div class="calc-result-row highlight">
+        <div class="calc-result-lbl">Monthly instalment</div>
+        <div class="calc-result-val big" id="calc-monthly">—</div>
+      </div>
+      <div class="calc-result-row">
+        <div class="calc-result-lbl">Total interest</div>
+        <div class="calc-result-val" id="calc-total-interest">—</div>
+      </div>
+      <div class="calc-result-row">
+        <div class="calc-result-lbl">Total repayment</div>
+        <div class="calc-result-val" id="calc-total-repay">—</div>
+      </div>
+      <div class="calc-coach-note" id="calc-coach-note" style="display:none">
+        &#128161; If monthly instalment is above customer budget, ask permission before recommending alternatives.
+      </div>
+    </div>
   </div>
 
   <button class="big-btn secondary" onclick="openFinishSheet()">Finish Deal</button>
@@ -206,7 +237,7 @@
     <div>Coming soon</div>
   </div>
 
-  <div class="settings-version">Apex Deal Coach · v1.4</div>
+  <div class="settings-version">Apex Deal Coach · v1.0</div>
 </div>
 
 <!-- ================= BOTTOM NAV ================= -->
