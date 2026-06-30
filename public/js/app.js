@@ -317,7 +317,7 @@ function localAnalyse(notesRaw) {
   if (n.includes('monthly') || n.includes('expensive')) warn = "Don't cut the price first — try restructuring the loan.";
   if (n.includes('compar'))                              warn = "Don't criticise competitors.";
 
-  let action = 'Listen actively for the next two minutes.';let action = 'Listen actively for the next two minutes.';
+  let action = 'Listen actively for the next two minutes.';
   if (n.includes('test drive') || intent >= 65) action = 'Book the test drive now.';
   if (n.includes('wife'))                        action = 'Offer a joint visit this weekend.';
 
