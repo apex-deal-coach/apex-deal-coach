@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════════
-// Apex Deal Coach v1.0 — app.js
-// Simplicity-first rebuild. AI makes salespeople wiser, not replaced.
+// Apex Deal Coach v1.5 — app.js
+// AI Sales Operating System. Apex teaches judgment, not scripts.
 // ════════════════════════════════════════════════════════════════
 
 function el(id) { return document.getElementById(id); }
@@ -41,10 +41,10 @@ function goLiveContinue()   { showScreen('live'); }
 // STORAGE — single source of truth
 // ════════════════════════════════════════════════════════════════
 
-const DEALS_KEY   = 'apex_v8';          // saved (finished) deals
-const DRAFT_KEY    = 'apex_live_draft';  // current in-progress conversation
-const SESSION_KEY  = 'apex_session_v1';  // today's counters
-const MEM_KEY       = 'apex_memory_v1';   // learning/insights data
+const DEALS_KEY   = 'apex_v8';
+const DRAFT_KEY   = 'apex_live_draft';
+const SESSION_KEY = 'apex_session_v1';
+const MEM_KEY     = 'apex_memory_v1';
 
 function loadDeals()    { try { return JSON.parse(localStorage.getItem(DEALS_KEY) || '[]'); } catch(e) { return []; } }
 function saveDeals(arr) { try { localStorage.setItem(DEALS_KEY, JSON.stringify(arr)); } catch(e) {} }
@@ -99,12 +99,85 @@ function renderHome() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// LIVE SCREEN — single conversation, single source of truth (draft)
+// LIVE SCREEN
 // ════════════════════════════════════════════════════════════════
 
-let _liveAnalysis = null; // last AI/local analysis result
-let _allNotesThisSession = []; // accumulated notes across all Update taps in this conversation
-let _calcOpen = false;
+let _liveAnalysis = null;
+let _allNotesThisSession = [];
+
+// ════════════════════════════════════════════════════════════════
+// CONVERSATION MEMORY — fact ledger, internal only (no UI in v1.5)
+// ════════════════════════════════════════════════════════════════
+
+function emptyMemory() {
+  return {
+    family: null,
+    budget: null,
+    budgetHistory: [],
+    timeline: null,
+    usage: null,
+    brandsCompared: [],
+    objectionsRaised: [],
+    objectionsResolved: [],
+    emotionalTriggers: [],
+    trustTrend: []
+  };
+}
+
+let _customerMemory = emptyMemory();
+
+function updateMemory(notesRaw, analysis) {
+  const n = (notesRaw || '').toLowerCase();
+  const m = _customerMemory;
+
+  if ((n.includes('kid') || n.includes('child') || n.includes('family')) && !m.family) {
+    m.family = notesRaw.trim().slice(0, 120);
+  }
+
+  const budgetMatch = n.match(/\$?\s?(\d[\d,]{2,})\s*(a month|\/mo|per month|monthly)?/);
+  if (budgetMatch && (n.includes('budget') || n.includes('month'))) {
+    const val = budgetMatch[1].replace(/,/g, '');
+    if (m.budget !== val) {
+      m.budget = val;
+      m.budgetHistory.push({ value: val, ts: Date.now() });
+    }
+  }
+
+  if (n.includes('urgent') || n.includes('asap') || n.includes('this week')) m.timeline = 'Urgent';
+  else if (n.includes('just browsing') || n.includes('not in a rush')) m.timeline = 'Browsing';
+
+  if (n.includes('daily') || n.includes('commute')) m.usage = 'Daily commute';
+  else if (n.includes('weekend')) m.usage = 'Weekend use';
+
+  if (n.includes('carro')) addUnique(m.brandsCompared, 'Carro');
+  ['toyota','honda','mazda','hyundai','kia','bmw','mercedes'].forEach(b => {
+    if (n.includes(b) && analysis && analysis.stage === 'Comparing') addUnique(m.brandsCompared, b.charAt(0).toUpperCase() + b.slice(1));
+  });
+
+  const objection = detectObjection(notesRaw);
+  if (objection) {
+    const wasRaised = m.objectionsRaised.includes(objection);
+    const seemsResolved = n.includes('okay') || n.includes('makes sense') || n.includes('understand now') || n.includes('agree');
+    if (wasRaised && seemsResolved) {
+      m.objectionsRaised = m.objectionsRaised.filter(o => o !== objection);
+      addUnique(m.objectionsResolved, objection);
+    } else {
+      addUnique(m.objectionsRaised, objection);
+    }
+  }
+
+  if (n.includes('excited') || n.includes('love')) m.emotionalTriggers.push('Excited: ' + notesRaw.trim().slice(0, 60));
+  if (n.includes('worried') || n.includes('anxious') || n.includes('concerned')) m.emotionalTriggers.push('Anxious: ' + notesRaw.trim().slice(0, 60));
+  if (m.emotionalTriggers.length > 5) m.emotionalTriggers = m.emotionalTriggers.slice(-5);
+
+  if (analysis && analysis.trust) {
+    m.trustTrend.push(analysis.trust);
+    if (m.trustTrend.length > 10) m.trustTrend = m.trustTrend.slice(-10);
+  }
+}
+
+function addUnique(arr, val) { if (val && !arr.includes(val)) arr.push(val); }
+function resetMemory() { _customerMemory = emptyMemory(); }
 
 function startNewCustomer() {
   const draft = loadDraft();
@@ -126,11 +199,17 @@ function startNewCustomer() {
   el('live-title').textContent = 'New customer';
   _liveAnalysis = null;
   _allNotesThisSession = [];
-  ['calc-price','calc-dp','calc-loan'].forEach(id => { el(id).value = ''; });
-  el('calc-tenure').value = '7';
-  el('calc-rate').value = '2.8';
+  resetMemory();
+  el('calc-price').value   = '';
+  el('calc-tradein').value = '';
+  el('calc-dp').value      = '';
+  el('calc-maxloan').value = '70';
+  el('calc-loan').value    = '—';
+  el('calc-tenure').value  = '7';
+  el('calc-rate').value    = '2.8';
+  el('calc-budget').value  = '';
   el('calc-results').style.display = 'none';
-  el('calc-panel').style.display = 'none';
+  el('calc-panel').style.display   = 'none';
   el('calc-toggle').classList.remove('open');
   _calcOpen = false;
   showToast('Ready for a new customer');
@@ -144,6 +223,7 @@ function liveLoadIntoForm() {
   el('live-notes').value = draft.notes || '';
   el('live-title').textContent = draft.name ? draft.name : 'Customer';
   _allNotesThisSession = draft.allNotes || [];
+  _customerMemory = draft.customerMemory || emptyMemory();
   if (draft.lastAnalysis) {
     _liveAnalysis = draft.lastAnalysis;
     applyLiveAnalysis(draft.lastAnalysis, true);
@@ -152,12 +232,13 @@ function liveLoadIntoForm() {
 
 function liveSaveDraft() {
   const draft = {
-    name:  el('live-name').value,
-    car:   el('live-car').value,
-    notes: el('live-notes').value,
-    lastAnalysis: _liveAnalysis,
-    allNotes: _allNotesThisSession,
-    ts: Date.now()
+    name:           el('live-name').value,
+    car:            el('live-car').value,
+    notes:          el('live-notes').value,
+    lastAnalysis:   _liveAnalysis,
+    allNotes:       _allNotesThisSession,
+    customerMemory: _customerMemory,
+    ts:             Date.now()
   };
   saveDraft(draft);
   el('live-title').textContent = draft.name ? draft.name : 'New customer';
@@ -173,26 +254,27 @@ function liveUpdate() {
   const name = el('live-name').value, car = el('live-car').value;
   const previousNotes = _allNotesThisSession.join(' ');
 
-  apexAI('live_copilot', { notes, name, car }, { previousNotes }).then(result => {
+  apexAI('live_copilot', { notes, name, car }, { previousNotes, customerMemory: _customerMemory }).then(result => {
     const analysis = result || localAnalyse(previousNotes + ' ' + notes);
     _liveAnalysis = analysis;
     _allNotesThisSession.push(notes);
+    updateMemory(notes, analysis);
     applyLiveAnalysis(analysis, false);
     liveSaveDraft();
-    btn.innerHTML = 'Update';
+    btn.innerHTML = 'Analyze Conversation';
   });
 }
 
 function applyLiveAnalysis(a, silent) {
-  el('live-trust').textContent  = a.trust  || '–';
-  el('live-intent').textContent = (a.intent != null ? a.intent + '%' : '–');
-  el('live-risk').textContent   = a.risk   || '–';
+  el('live-trust').textContent  = a.trust || '–';
+  el('live-intent').textContent = a.stage || (a.intent != null ? a.intent + '%' : '–');
+  el('live-risk').textContent   = a.risk  || '–';
   el('status-row').style.display = '';
 
   el('advice-question').textContent = a.bestQuestion || a.question || '—';
-  el('advice-say').textContent      = a.say    || '—';
-  el('advice-warn').textContent     = a.warn   || '—';
-  el('advice-action').textContent   = a.action || '—';
+  el('advice-say').textContent      = a.say          || '—';
+  el('advice-warn').textContent     = a.avoid        || a.warn || '—';
+  el('advice-action').textContent   = a.action       || '—';
   el('live-advice').style.display = '';
 
   if (!silent) showToast('Updated');
@@ -270,15 +352,17 @@ function finishDeal(outcome) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// FINANCE CALCULATOR — Singapore car loan instalment estimator
-// Formula (as specified):
-//   Total months    = loan tenure (years) × 12
-//   Total interest  = Loan amount × interest rate × loan tenure
-//   Monthly instalment = (Loan amount + total interest) / total months
+// FINANCE CALCULATOR — Singapore car loan (Finance Brain v1)
+// Two-constraint loan formula — whichever limit is lower wins:
+//   byCashFlow = price − downpayment − trade-in
+//   byMaxLoan  = price × (maxLoanPct / 100)
+//   loan       = MIN(byCashFlow, byMaxLoan)
 // ════════════════════════════════════════════════════════════════
 
+let _calcOpen = false;
+
 function toggleCalculator() {
-  const panel = el('calc-panel');
+  const panel  = el('calc-panel');
   const toggle = el('calc-toggle');
   _calcOpen = panel.style.display === 'none';
   panel.style.display = _calcOpen ? '' : 'none';
@@ -286,17 +370,19 @@ function toggleCalculator() {
 }
 
 function runCalculator() {
-  const price   = parseFloat(el('calc-price').value)  || 0;
-  const dp      = parseFloat(el('calc-dp').value)      || 0;
-  let   loan    = parseFloat(el('calc-loan').value);
-  const tenure  = parseFloat(el('calc-tenure').value)  || 0;
-  const rate    = parseFloat(el('calc-rate').value)    || 0;
+  const price      = parseFloat(el('calc-price').value)   || 0;
+  const tradein    = parseFloat(el('calc-tradein').value)  || 0;
+  const dp         = parseFloat(el('calc-dp').value)       || 0;
+  const maxLoanPct = parseFloat(el('calc-maxloan').value)  || 0;
+  const tenure     = parseFloat(el('calc-tenure').value)   || 0;
+  const rate       = parseFloat(el('calc-rate').value)     || 0;
+  const budget     = parseFloat(el('calc-budget').value)   || 0;
 
-  // Auto-calculate loan amount from price − downpayment, unless user has typed their own loan amount
-  if (isNaN(loan) || el('calc-loan').value === '') {
-    loan = Math.max(0, price - dp);
-    if (price > 0) el('calc-loan').value = loan;
-  }
+  const byCashFlow = Math.max(0, price - dp - tradein);
+  const byMaxLoan  = maxLoanPct > 0 ? price * (maxLoanPct / 100) : byCashFlow;
+  const loan = Math.min(byCashFlow, byMaxLoan);
+
+  el('calc-loan').value = loan > 0 ? 'SGD ' + Math.round(loan).toLocaleString('en-SG') : '—';
 
   if (!loan || !tenure || rate < 0) {
     el('calc-results').style.display = 'none';
@@ -305,48 +391,84 @@ function runCalculator() {
 
   const totalMonths   = tenure * 12;
   const totalInterest = loan * (rate / 100) * tenure;
-  const monthly        = (loan + totalInterest) / totalMonths;
-  const totalRepay      = loan + totalInterest;
+  const monthly       = (loan + totalInterest) / totalMonths;
+  const totalRepay    = loan + totalInterest;
+  const cashToday     = dp;
 
-  el('calc-monthly').textContent        = 'SGD ' + Math.round(monthly).toLocaleString('en-SG');
+  el('calc-monthly').textContent        = 'SGD ' + monthly.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   el('calc-total-interest').textContent = 'SGD ' + Math.round(totalInterest).toLocaleString('en-SG');
   el('calc-total-repay').textContent    = 'SGD ' + Math.round(totalRepay).toLocaleString('en-SG');
+  el('calc-cash-today').textContent     = 'SGD ' + Math.round(cashToday).toLocaleString('en-SG');
   el('calc-results').style.display = '';
 
-  // Apex coaching note — always shown alongside the result as a standing reminder
-  el('calc-coach-note').style.display = '';
+  const noteEl = el('calc-coach-note');
+  if (budget > 0) {
+    const diff = monthly - budget;
+    if (diff > 0) {
+      noteEl.textContent = '\u26A0\uFE0F This is SGD ' + Math.round(diff).toLocaleString('en-SG') + ' above the customer\'s stated budget. Ask permission before recommending alternatives.';
+    } else {
+      noteEl.textContent = '\u2705 This fits within the customer\'s stated budget, with SGD ' + Math.round(-diff).toLocaleString('en-SG') + ' to spare.';
+    }
+  } else {
+    noteEl.textContent = '\uD83D\uDCA1 If monthly instalment is above customer budget, ask permission before recommending alternatives.';
+  }
+  noteEl.style.display = '';
 }
 
 // ════════════════════════════════════════════════════════════════
-// LOCAL FALLBACK ANALYSIS — used if GPT API is unavailable
-// ════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════
-// REAL SIGNAL DETECTION — replaces any hardcoded/fake insight data
+// SIGNAL DETECTION
 // ════════════════════════════════════════════════════════════════
 
 function detectObjection(notesRaw) {
   const n = (notesRaw || '').toLowerCase();
-  if (n.includes('expensive') || n.includes('too high') || n.includes('price'))     return 'Price too high';
-  if (n.includes('think') || n.includes('not sure'))                                 return 'Needs time to think';
-  if (n.includes('wife') || n.includes('spouse') || n.includes('husband'))           return 'Needs partner approval';
-  if (n.includes('compar') || n.includes('other dealer'))                            return 'Comparing other dealers';
-  if (n.includes('loan') || n.includes('reject'))                                    return 'Financing concern';
-  if (n.includes('trade'))                                                           return 'Trade-in valuation concern';
+  if (n.includes('expensive') || n.includes('too high') || n.includes('price'))   return 'Price too high';
+  if (n.includes('think') || n.includes('not sure'))                               return 'Needs time to think';
+  if (n.includes('wife') || n.includes('spouse') || n.includes('husband'))         return 'Needs partner approval';
+  if (n.includes('compar') || n.includes('other dealer'))                          return 'Comparing other dealers';
+  if (n.includes('loan') || n.includes('reject'))                                  return 'Financing concern';
+  if (n.includes('trade'))                                                         return 'Trade-in valuation concern';
   return '';
 }
 
 function detectMistake(notesRaw, analysis) {
   const n = (notesRaw || '').toLowerCase();
-  if ((n.includes('expensive') || n.includes('price')) && n.includes('discount'))    return 'Offered a discount too early';
-  if (analysis && analysis.risk === 'High' && !n.includes('listen'))                 return 'Talked more than listened';
-  if (!n.includes('next') && !n.includes('follow') && !n.includes('book'))           return 'No clear next step locked in';
+  if ((n.includes('expensive') || n.includes('price')) && n.includes('discount')) return 'Offered a discount too early';
+  if (analysis && analysis.risk === 'High' && !n.includes('listen'))               return 'Talked more than listened';
+  if (!n.includes('next') && !n.includes('follow') && !n.includes('book'))        return 'No clear next step locked in';
   return '';
 }
 
+// ════════════════════════════════════════════════════════════════
+// SALES BRAIN v2 — five-step reasoning, every time, in order:
+//   1. What is the customer feeling?
+//   2. Why are they feeling this?
+//   3. What is the salesperson trying to achieve?
+//   4. What is the single best next question? (exactly one)
+//   5. What should the salesperson NEVER do next?
+// Apex never teaches scripts. Apex teaches judgment.
+// Apex reduces cognitive load, not increases it.
+// ════════════════════════════════════════════════════════════════
+
 function localAnalyse(notesRaw) {
   const n = notesRaw.toLowerCase();
+  const mem = _customerMemory;
 
+  // ── STEP 1: What is the customer feeling? ──
+  let feeling = 'Curious';
+  if (n.includes('worried') || n.includes('anxious') || n.includes('not sure')) feeling = 'Hesitating';
+  else if (n.includes('excited') || n.includes('love'))                          feeling = 'Excited';
+  else if (n.includes('expensive') || n.includes('compar'))                       feeling = 'Defensive';
+  else if (n.includes('confus') || n.includes("don't understand"))                feeling = 'Confused';
+
+  // ── STEP 2: Why are they feeling this? ──
+  let why = 'Still forming an opinion';
+  if (n.includes('expensive') || n.includes('price') || n.includes('budget'))  why = 'Budget';
+  else if (n.includes('wife') || n.includes('spouse') || n.includes('family')) why = 'Family';
+  else if (n.includes('compar') || n.includes('carro') || n.includes('other')) why = 'Comparison';
+  else if (n.includes('trust') || n.includes('recommend'))                      why = 'Trust';
+  else if (n.includes('bad experience') || n.includes('last time'))             why = 'Previous bad experience';
+
+  // ── Buying intent (numeric, internal only) ──
   let intent = 40;
   ['like','love','interested','yes','agree','book','test drive','confirm'].forEach(w => { if (n.includes(w)) intent += 8; });
   ['no','not sure','think','expensive','high','compare','later','maybe'].forEach(w => { if (n.includes(w)) intent -= 6; });
@@ -355,53 +477,77 @@ function localAnalyse(notesRaw) {
   let trust = 'Medium';
   if (n.includes('trust') || n.includes('recommend') || intent >= 70) trust = 'High';
   if (n.includes('worried') || n.includes('not sure about') || intent <= 30) trust = 'Low';
+  if (mem.trustTrend.includes('High') && trust === 'Low' && !n.includes('worried')) trust = 'Medium';
 
   let risk = 'Medium';
   if (['wife','spouse','expensive','compare','thinking','not ready'].some(w => n.includes(w))) risk = 'High';
   if (['test drive','book','deposit','confirm'].some(w => n.includes(w)) && risk !== 'High') risk = 'Low';
 
-  let stage = 'Discovery';
-  if (n.includes('sign') || n.includes('deposit') || n.includes('confirm')) stage = 'Closing';
-  else if (n.includes('expensive') || n.includes('think') || n.includes('wife')) stage = 'Objection';
-  else if (n.includes('compar')) stage = 'Comparing';
-  else if (intent >= 60) stage = 'Trust Building';
+  // ── Conversation stage: Exploring → Interested → Comparing → Deciding → Committing ──
+  let stage = 'Exploring';
+  if (n.includes('sign') || n.includes('deposit') || n.includes('confirm'))          stage = 'Committing';
+  else if (n.includes('expensive') || n.includes('think') || n.includes('wife'))     stage = 'Deciding';
+  else if (n.includes('compar'))                                                       stage = 'Comparing';
+  else if (intent >= 60)                                                                stage = 'Interested';
 
-  // ── Rejects features, focuses on outlook / design / price instead ──
-  // Common in Singapore: customer dismisses technical specs, cares about looks and price only.
-  const dismissesFeatures = (n.includes('not interested in') || n.includes('don\'t care about') || n.includes('skip the') || n.includes('don\'t need')) &&
-                             (n.includes('feature') || n.includes('spec') || n.includes('tech'));
-  const focusesOnOutlook  = n.includes('design') || n.includes('outlook') || n.includes('look') || n.includes('color') || n.includes('colour') || n.includes('exterior') || n.includes('style');
+  const dismissesFeatures  = (n.includes('not interested in') || n.includes("don't care about") || n.includes('skip the') || n.includes("don't need")) && (n.includes('feature') || n.includes('spec') || n.includes('tech'));
+  const focusesOnOutlook   = n.includes('design') || n.includes('outlook') || n.includes('look') || n.includes('color') || n.includes('colour') || n.includes('exterior') || n.includes('style');
   const focusesOnPriceOnly = (n.includes('just want') || n.includes('only care about') || n.includes('bottom line')) && (n.includes('price') || n.includes('cheap'));
   const isAestheticPriceBuyer = dismissesFeatures || focusesOnOutlook || focusesOnPriceOnly;
 
+  // ── STEP 3: What is the salesperson trying to achieve? ──
+  let objective = 'Build trust';
+  if (stage === 'Interested')   objective = 'Discover motivation';
+  if (stage === 'Comparing')    objective = 'Reduce price sensitivity';
+  if (stage === 'Deciding')     objective = 'Handle objection';
+  if (stage === 'Committing')   objective = 'Close';
+  if (isAestheticPriceBuyer)    objective = 'Reduce price sensitivity';
+  if (mem.objectionsRaised.length > 0 && stage !== 'Committing') objective = 'Handle objection';
+
+  // ── STEP 4: single best next question — exactly one ──
   let bestQuestion = 'What would need to be true for you to feel completely comfortable deciding today?';
-  if (stage === 'Discovery')      bestQuestion = 'What is the one thing your current car does not give you that you are looking for now?';
-  if (stage === 'Trust Building') bestQuestion = 'What would make you feel fully confident this is the right decision?';
-  if (stage === 'Comparing')      bestQuestion = 'Out of everything you have seen, what is still missing?';
-  if (stage === 'Objection')      bestQuestion = n.includes('wife') ? 'What would your partner need to see to feel comfortable?' : 'What specifically would need to change here?';
-  if (stage === 'Closing')        bestQuestion = 'Is there anything that would stop you from moving forward today?';
-  if (isAestheticPriceBuyer)      bestQuestion = 'What colour or look would feel most like "you" when you picture driving this every day?';
+  if (objective === 'Build trust')              bestQuestion = 'What would make you feel fully confident this is the right decision?';
+  if (objective === 'Discover motivation')      bestQuestion = 'What is the one thing your current car does not give you that you are looking for now?';
+  if (objective === 'Reduce price sensitivity') bestQuestion = 'Out of everything you have seen, what is still missing?';
+  if (objective === 'Handle objection')         bestQuestion = (why === 'Family') ? 'What would your partner need to see to feel comfortable?' : 'What specifically would need to change here?';
+  if (objective === 'Close')                    bestQuestion = 'Is there anything that would stop you from moving forward today?';
+  if (isAestheticPriceBuyer)                    bestQuestion = 'What colour or look would feel most like "you" when you picture driving this every day?';
+  if (mem.objectionsResolved.includes('Needs partner approval') && bestQuestion.includes('partner')) {
+    bestQuestion = 'Now that we have covered that -- what would help you feel ready to decide?';
+  }
 
   let say = 'Tell me more about what matters most to you here.';
-  if (n.includes('monthly') || n.includes('expensive')) say = 'Let me show you a few finance options side by side.';
-  if (n.includes('wife') || n.includes('spouse'))        say = 'Would it help if you both came in together?';
-  if (isAestheticPriceBuyer)                              say = 'Let\'s focus on how this looks and what it costs you monthly — I won\'t walk you through every spec.';
+  if (why === 'Budget')          say = 'Let me show you a few finance options side by side.';
+  if (why === 'Family')          say = 'Would it help if you both came in together?';
+  if (isAestheticPriceBuyer)     say = "Let's focus on how this looks and what it costs you monthly -- I won't walk you through every spec.";
 
-  let warn = "Don't fill the silence — let them think.";
-  if (n.includes('monthly') || n.includes('expensive')) warn = "Don't cut the price first — try restructuring the loan.";
-  if (n.includes('compar'))                              warn = "Don't criticise competitors.";
-  if (isAestheticPriceBuyer)                              warn = "Don't keep pitching technical features — they've told you that's not what moves them.";
+  // ── STEP 5: what the salesperson should NEVER do next ──
+  let avoid = "Don't fill the silence -- let them think.";
+  if (why === 'Budget')          avoid = "Don't cut the price first -- try restructuring the loan.";
+  if (why === 'Comparison')      avoid = "Don't criticise competitors.";
+  if (isAestheticPriceBuyer)     avoid = "Don't keep pitching technical features or comparing specifications -- they've told you that's not what moves them.";
+  if (objective === 'Close')     avoid = "Don't over-explain now -- they're close. Extra talking creates doubt, not confidence.";
 
   let action = 'Listen actively for the next two minutes.';
   if (n.includes('test drive') || intent >= 65) action = 'Book the test drive now.';
-  if (n.includes('wife'))                        action = 'Offer a joint visit this weekend.';
-  if (isAestheticPriceBuyer)                      action = 'Show colour options and the monthly instalment number — skip the spec sheet.';
+  if (why === 'Family')                          action = 'Offer a joint visit this weekend.';
+  if (isAestheticPriceBuyer)                     action = 'Show colour options and the monthly instalment number -- skip the spec sheet.';
 
-  return { mood: 'Neutral', moodIcon: '😐', intent, trust, risk, stage, bestQuestion, say, warn, action, emotions: [] };
+  return {
+    mood: feeling, moodIcon: feelingIcon(feeling),
+    feeling, why, objective,
+    intent, trust, risk, stage,
+    bestQuestion, say, warn: avoid, avoid, action,
+    emotions: []
+  };
+}
+
+function feelingIcon(feeling) {
+  return { Curious:'\uD83E\uDD14', Hesitating:'\uD83D\uDE1F', Excited:'\uD83E\uDD29', Defensive:'\uD83D\uDE24', Confused:'\uD83D\uDE15' }[feeling] || '\uD83D\uDE10';
 }
 
 // ════════════════════════════════════════════════════════════════
-// APEX AI BRIDGE — calls /api/apex-ai, falls back to local logic
+// APEX AI BRIDGE
 // ════════════════════════════════════════════════════════════════
 
 async function apexAI(moduleName, input, context) {
@@ -439,7 +585,7 @@ function testAPIStatus() {
       if (p.status === 200 && p.data.ok) { val.textContent = 'Connected'; val.style.color = 'var(--green)'; }
       else { val.textContent = p.data.error || 'Error'; val.style.color = 'var(--red)'; }
     })
-    .catch(err => { val.textContent = 'Offline'; val.style.color = 'var(--red)'; });
+    .catch(() => { val.textContent = 'Offline'; val.style.color = 'var(--red)'; });
 }
 
 function refreshAPIStatusLabel() {
@@ -549,7 +695,7 @@ function openCoachMe(type) {
   el('coach-why').textContent      = c.why;
   el('coach-mistake').textContent  = c.mistake;
   el('coach-better-q').textContent = c.betterQ;
-  el('coach-more').style.display = 'none';
+  el('coach-more').style.display   = 'none';
   el('coach-more-toggle').classList.remove('open');
   el('coach-modal').classList.add('open');
 }
@@ -563,7 +709,6 @@ function toggleCoachMore() {
 }
 
 function closeCoachMe() { el('coach-modal').classList.remove('open'); }
-
 
 // ════════════════════════════════════════════════════════════════
 // INSIGHTS SCREEN
@@ -607,7 +752,6 @@ function renderInsights() {
   el('ins-improve').textContent = improvement;
 }
 
-// ── Stat drilldown ──
 function openStatDrill(type) {
   const all = loadDeals();
   let title = '', items = [];
@@ -621,21 +765,15 @@ function openStatDrill(type) {
     title = 'Deals saved';
   } else if (type === 'objection') {
     const topObjection = el('ins-objection').textContent;
-    items = (topObjection && topObjection !== 'No data yet')
-      ? all.filter(c => c.result && c.result.objection === topObjection)
-      : [];
+    items = (topObjection && topObjection !== 'No data yet') ? all.filter(c => c.result && c.result.objection === topObjection) : [];
     title = topObjection && topObjection !== 'No data yet' ? '"' + topObjection + '"' : 'Customers with an objection';
   } else if (type === 'mistake') {
     const topMistake = el('ins-mistake').textContent;
-    items = (topMistake && topMistake !== 'No data yet')
-      ? all.filter(c => c.result && c.result.mistakeFlag === topMistake)
-      : [];
+    items = (topMistake && topMistake !== 'No data yet') ? all.filter(c => c.result && c.result.mistakeFlag === topMistake) : [];
     title = topMistake && topMistake !== 'No data yet' ? '"' + topMistake + '"' : 'Deals with a flagged mistake';
   } else if (type === 'question') {
     const topQuestion = el('ins-question').textContent;
-    items = (topQuestion && topQuestion !== 'No data yet')
-      ? all.filter(c => c.result && c.result.bestQuestion === topQuestion)
-      : [];
+    items = (topQuestion && topQuestion !== 'No data yet') ? all.filter(c => c.result && c.result.bestQuestion === topQuestion) : [];
     title = 'Where this question was used';
   }
 
