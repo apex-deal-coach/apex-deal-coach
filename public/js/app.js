@@ -41,10 +41,10 @@ function goLiveContinue()   { showScreen('live'); }
 // STORAGE — single source of truth
 // ════════════════════════════════════════════════════════════════
 
-const DEALS_KEY   = 'apex_v8';          // saved (finished) deals
-const DRAFT_KEY    = 'apex_live_draft';  // current in-progress conversation
-const SESSION_KEY  = 'apex_session_v1';  // today's counters
-const MEM_KEY       = 'apex_memory_v1';   // learning/insights data
+const DEALS_KEY   = 'apex_v8';
+const DRAFT_KEY   = 'apex_live_draft';
+const SESSION_KEY = 'apex_session_v1';
+const MEM_KEY     = 'apex_memory_v1';
 
 function loadDeals()    { try { return JSON.parse(localStorage.getItem(DEALS_KEY) || '[]'); } catch(e) { return []; } }
 function saveDeals(arr) { try { localStorage.setItem(DEALS_KEY, JSON.stringify(arr)); } catch(e) {} }
@@ -99,38 +99,33 @@ function renderHome() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// LIVE SCREEN — single conversation, single source of truth (draft)
+// LIVE SCREEN
 // ════════════════════════════════════════════════════════════════
 
-let _liveAnalysis = null; // last AI/local analysis result
-let _allNotesThisSession = []; // accumulated notes across all Update taps in this conversation
+let _liveAnalysis = null;
+let _allNotesThisSession = [];
 
 // ════════════════════════════════════════════════════════════════
 // CONVERSATION MEMORY — fact ledger, internal only (no UI in v1.5)
-// Persists across Updates within one conversation. Sales Brain v2
-// reads this before reasoning, so it never contradicts or forgets
-// something the customer already said.
 // ════════════════════════════════════════════════════════════════
 
 function emptyMemory() {
   return {
-    family: null,           // e.g. "has two young children"
-    budget: null,            // e.g. "1500" — last stated value wins, but history is kept
-    budgetHistory: [],        // array of {value, ts} so contradictions are visible, not silently lost
-    timeline: null,            // e.g. "Urgent" / "Browsing"
-    usage: null,                // e.g. "Daily commute" / "Weekend use"
-    brandsCompared: [],          // e.g. ["Carro", "Honda"]
-    objectionsRaised: [],         // only objections not yet resolved
-    objectionsResolved: [],        // objections that have since been addressed
-    emotionalTriggers: [],          // bounded recent list, e.g. "Excited: ..."
-    trustTrend: []                   // trust value over time, e.g. ["Medium","Medium","High"]
+    family: null,
+    budget: null,
+    budgetHistory: [],
+    timeline: null,
+    usage: null,
+    brandsCompared: [],
+    objectionsRaised: [],
+    objectionsResolved: [],
+    emotionalTriggers: [],
+    trustTrend: []
   };
 }
 
 let _customerMemory = emptyMemory();
 
-// Merge new signals into the existing memory ledger. Never silently
-// drop existing facts — only add, append, or explicitly revise.
 function updateMemory(notesRaw, analysis) {
   const n = (notesRaw || '').toLowerCase();
   const m = _customerMemory;
@@ -182,7 +177,6 @@ function updateMemory(notesRaw, analysis) {
 }
 
 function addUnique(arr, val) { if (val && !arr.includes(val)) arr.push(val); }
-
 function resetMemory() { _customerMemory = emptyMemory(); }
 
 function startNewCustomer() {
@@ -192,9 +186,13 @@ function startNewCustomer() {
     if (!confirm('Discard current conversation?\nThis clears notes and AI suggestions.\nSaved customers are not affected.')) return;
   }
   clearDraft();
-  el('live-name').value  = '';
-  el('live-car').value   = '';
-  el('live-notes').value = '';
+  el('live-name').value        = '';
+  el('live-car').value         = '';
+  el('live-mobile').value      = '';
+  el('live-budget').value      = '';
+  el('live-tradein-car').value = '';
+  el('live-remarks').value     = '';
+  el('live-notes').value       = '';
   el('live-trust').textContent  = '–';
   el('live-intent').textContent = '–';
   el('live-risk').textContent   = '–';
@@ -206,16 +204,16 @@ function startNewCustomer() {
   _liveAnalysis = null;
   _allNotesThisSession = [];
   resetMemory();
-  el('calc-price').value = '';
+  el('calc-price').value   = '';
   el('calc-tradein').value = '';
-  el('calc-dp').value = '';
+  el('calc-dp').value      = '';
   el('calc-maxloan').value = '70';
-  el('calc-loan').value = '—';
-  el('calc-tenure').value = '7';
-  el('calc-rate').value = '2.8';
-  el('calc-budget').value = '';
+  el('calc-loan').value    = '—';
+  el('calc-tenure').value  = '7';
+  el('calc-rate').value    = '2.8';
+  el('calc-budget').value  = '';
   el('calc-results').style.display = 'none';
-  el('calc-panel').style.display = 'none';
+  el('calc-panel').style.display   = 'none';
   el('calc-toggle').classList.remove('open');
   _calcOpen = false;
   showToast('Ready for a new customer');
@@ -224,9 +222,13 @@ function startNewCustomer() {
 function liveLoadIntoForm() {
   const draft = loadDraft();
   if (!draft) return;
-  el('live-name').value  = draft.name  || '';
-  el('live-car').value   = draft.car   || '';
-  el('live-notes').value = draft.notes || '';
+  el('live-name').value        = draft.name        || '';
+  el('live-car').value         = draft.car         || '';
+  el('live-mobile').value      = draft.mobile      || '';
+  el('live-budget').value      = draft.budgetField || '';
+  el('live-tradein-car').value = draft.tradeinCar  || '';
+  el('live-remarks').value     = draft.remarks     || '';
+  el('live-notes').value       = draft.notes       || '';
   el('live-title').textContent = draft.name ? draft.name : 'Customer';
   _allNotesThisSession = draft.allNotes || [];
   _customerMemory = draft.customerMemory || emptyMemory();
@@ -238,11 +240,15 @@ function liveLoadIntoForm() {
 
 function liveSaveDraft() {
   const draft = {
-    name:  el('live-name').value,
-    car:   el('live-car').value,
-    notes: el('live-notes').value,
-    lastAnalysis: _liveAnalysis,
-    allNotes: _allNotesThisSession,
+    name:        el('live-name').value,
+    car:         el('live-car').value,
+    mobile:      el('live-mobile').value,
+    budgetField: el('live-budget').value,
+    tradeinCar:  el('live-tradein-car').value,
+    remarks:     el('live-remarks').value,
+    notes:       el('live-notes').value,
+    lastAnalysis:   _liveAnalysis,
+    allNotes:       _allNotesThisSession,
     customerMemory: _customerMemory,
     ts: Date.now()
   };
@@ -272,15 +278,15 @@ function liveUpdate() {
 }
 
 function applyLiveAnalysis(a, silent) {
-  el('live-trust').textContent  = a.trust  || '–';
-  el('live-intent').textContent = a.stage  || (a.intent != null ? a.intent + '%' : '–');
-  el('live-risk').textContent   = a.risk   || '–';
+  el('live-trust').textContent  = a.trust || '–';
+  el('live-intent').textContent = a.stage || (a.intent != null ? a.intent + '%' : '–');
+  el('live-risk').textContent   = a.risk  || '–';
   el('status-row').style.display = '';
 
   el('advice-question').textContent = a.bestQuestion || a.question || '—';
-  el('advice-say').textContent      = a.say    || '—';
-  el('advice-warn').textContent     = a.avoid  || a.warn || '—';
-  el('advice-action').textContent   = a.action || '—';
+  el('advice-say').textContent      = a.say          || '—';
+  el('advice-warn').textContent     = a.avoid        || a.warn || '—';
+  el('advice-action').textContent   = a.action       || '—';
   el('live-advice').style.display = '';
 
   if (!silent) showToast('Updated');
@@ -316,9 +322,13 @@ function closeFinishSheet() { el('finish-modal').classList.remove('open'); }
 function finishDeal(outcome) {
   closeFinishSheet();
 
-  const name  = el('live-name').value.trim();
-  const car   = el('live-car').value.trim();
-  const notes = el('live-notes').value.trim();
+  const name       = el('live-name').value.trim();
+  const car        = el('live-car').value.trim();
+  const mobile     = el('live-mobile').value.trim();
+  const budgetField = el('live-budget').value.trim();
+  const tradeinCar  = el('live-tradein-car').value.trim();
+  const remarks     = el('live-remarks').value.trim();
+  const notes      = el('live-notes').value.trim();
 
   const a = _liveAnalysis || {};
   const objectionText = detectObjection(notes);
@@ -326,7 +336,7 @@ function finishDeal(outcome) {
   const dealRecord = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2),
     ts: Date.now(),
-    input: { name, car, notes },
+    input: { name, car, mobile, budgetField, tradeinCar, remarks, notes },
     result: {
       profile: { type: '', stage: a.stage || '', trust: a.trust || '', prob: a.intent || 0 },
       risk: a.risk || 'Medium',
@@ -358,17 +368,13 @@ function finishDeal(outcome) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// FINANCE CALCULATOR — Singapore car loan instalment estimator
-// Formula (as specified):
-//   Total months    = loan tenure (years) × 12
-//   Total interest  = Loan amount × interest rate × loan tenure
-//   Monthly instalment = (Loan amount + total interest) / total months
+// FINANCE CALCULATOR
 // ════════════════════════════════════════════════════════════════
 
 let _calcOpen = false;
 
 function toggleCalculator() {
-  const panel = el('calc-panel');
+  const panel  = el('calc-panel');
   const toggle = el('calc-toggle');
   _calcOpen = panel.style.display === 'none';
   panel.style.display = _calcOpen ? '' : 'none';
@@ -376,16 +382,14 @@ function toggleCalculator() {
 }
 
 function runCalculator() {
-  const price    = parseFloat(el('calc-price').value)    || 0;
-  const tradein  = parseFloat(el('calc-tradein').value)   || 0;
-  const dp       = parseFloat(el('calc-dp').value)        || 0;
-  const maxLoanPct = parseFloat(el('calc-maxloan').value) || 0;
-  const tenure   = parseFloat(el('calc-tenure').value)    || 0;
-  const rate     = parseFloat(el('calc-rate').value)      || 0;
-  const budget   = parseFloat(el('calc-budget').value)    || 0;
+  const price      = parseFloat(el('calc-price').value)   || 0;
+  const tradein    = parseFloat(el('calc-tradein').value)  || 0;
+  const dp         = parseFloat(el('calc-dp').value)       || 0;
+  const maxLoanPct = parseFloat(el('calc-maxloan').value)  || 0;
+  const tenure     = parseFloat(el('calc-tenure').value)   || 0;
+  const rate       = parseFloat(el('calc-rate').value)     || 0;
+  const budget     = parseFloat(el('calc-budget').value)   || 0;
 
-  // Loan amount is always derived fresh from two constraints — whichever is lower wins.
-  // The field is read-only, so there is no stale-override risk (lesson from v1.4.1).
   const byCashFlow = Math.max(0, price - dp - tradein);
   const byMaxLoan  = maxLoanPct > 0 ? price * (maxLoanPct / 100) : byCashFlow;
   const loan = Math.min(byCashFlow, byMaxLoan);
@@ -399,9 +403,9 @@ function runCalculator() {
 
   const totalMonths   = tenure * 12;
   const totalInterest = loan * (rate / 100) * tenure;
-  const monthly         = (loan + totalInterest) / totalMonths;
-  const totalRepay       = loan + totalInterest;
-  const cashToday          = dp; // the cash the customer brings today, separate from the financed amount
+  const monthly       = (loan + totalInterest) / totalMonths;
+  const totalRepay    = loan + totalInterest;
+  const cashToday     = dp;
 
   el('calc-monthly').textContent        = 'SGD ' + monthly.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   el('calc-total-interest').textContent = 'SGD ' + Math.round(totalInterest).toLocaleString('en-SG');
@@ -409,7 +413,6 @@ function runCalculator() {
   el('calc-cash-today').textContent     = 'SGD ' + Math.round(cashToday).toLocaleString('en-SG');
   el('calc-results').style.display = '';
 
-  // Apex coaching note — reflects budget comparison when a budget is entered, generic reminder otherwise
   const noteEl = el('calc-coach-note');
   if (budget > 0) {
     const diff = monthly - budget;
@@ -425,55 +428,42 @@ function runCalculator() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// LOCAL FALLBACK ANALYSIS — used if GPT API is unavailable
-// ════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════
-// REAL SIGNAL DETECTION — replaces any hardcoded/fake insight data
+// SIGNAL DETECTION
 // ════════════════════════════════════════════════════════════════
 
 function detectObjection(notesRaw) {
   const n = (notesRaw || '').toLowerCase();
-  if (n.includes('expensive') || n.includes('too high') || n.includes('price'))     return 'Price too high';
-  if (n.includes('think') || n.includes('not sure'))                                 return 'Needs time to think';
-  if (n.includes('wife') || n.includes('spouse') || n.includes('husband'))           return 'Needs partner approval';
-  if (n.includes('compar') || n.includes('other dealer'))                            return 'Comparing other dealers';
-  if (n.includes('loan') || n.includes('reject'))                                    return 'Financing concern';
-  if (n.includes('trade'))                                                           return 'Trade-in valuation concern';
+  if (n.includes('expensive') || n.includes('too high') || n.includes('price'))   return 'Price too high';
+  if (n.includes('think') || n.includes('not sure'))                               return 'Needs time to think';
+  if (n.includes('wife') || n.includes('spouse') || n.includes('husband'))         return 'Needs partner approval';
+  if (n.includes('compar') || n.includes('other dealer'))                          return 'Comparing other dealers';
+  if (n.includes('loan') || n.includes('reject'))                                  return 'Financing concern';
+  if (n.includes('trade'))                                                         return 'Trade-in valuation concern';
   return '';
 }
 
 function detectMistake(notesRaw, analysis) {
   const n = (notesRaw || '').toLowerCase();
-  if ((n.includes('expensive') || n.includes('price')) && n.includes('discount'))    return 'Offered a discount too early';
-  if (analysis && analysis.risk === 'High' && !n.includes('listen'))                 return 'Talked more than listened';
-  if (!n.includes('next') && !n.includes('follow') && !n.includes('book'))           return 'No clear next step locked in';
+  if ((n.includes('expensive') || n.includes('price')) && n.includes('discount')) return 'Offered a discount too early';
+  if (analysis && analysis.risk === 'High' && !n.includes('listen'))               return 'Talked more than listened';
+  if (!n.includes('next') && !n.includes('follow') && !n.includes('book'))        return 'No clear next step locked in';
   return '';
 }
 
 // ════════════════════════════════════════════════════════════════
-// SALES BRAIN v2 — five-step reasoning, every time, in order:
-//   1. What is the customer feeling?
-//   2. Why are they feeling this?
-//   3. What is the salesperson trying to achieve?
-//   4. What is the single best next question? (exactly one)
-//   5. What should the salesperson NEVER do next?
-// Apex never teaches scripts. Apex teaches judgment.
-// Apex reduces cognitive load, not increases it.
+// SALES BRAIN v2 — five-step reasoning
 // ════════════════════════════════════════════════════════════════
 
 function localAnalyse(notesRaw) {
   const n = notesRaw.toLowerCase();
-  const mem = _customerMemory; // read existing facts before reasoning — never contradict what's known
+  const mem = _customerMemory;
 
-  // ── STEP 1: What is the customer feeling? ──
   let feeling = 'Curious';
   if (n.includes('worried') || n.includes('anxious') || n.includes('not sure')) feeling = 'Hesitating';
   else if (n.includes('excited') || n.includes('love'))                          feeling = 'Excited';
   else if (n.includes('expensive') || n.includes('compar'))                       feeling = 'Defensive';
   else if (n.includes('confus') || n.includes("don't understand"))                feeling = 'Confused';
 
-  // ── STEP 2: Why are they feeling this? ──
   let why = 'Still forming an opinion';
   if (n.includes('expensive') || n.includes('price') || n.includes('budget'))  why = 'Budget';
   else if (n.includes('wife') || n.includes('spouse') || n.includes('family')) why = 'Family';
@@ -481,7 +471,6 @@ function localAnalyse(notesRaw) {
   else if (n.includes('trust') || n.includes('recommend'))                      why = 'Trust';
   else if (n.includes('bad experience') || n.includes('last time'))             why = 'Previous bad experience';
 
-  // ── Buying intent (numeric, internal only — drives stage, trust, risk) ──
   let intent = 40;
   ['like','love','interested','yes','agree','book','test drive','confirm'].forEach(w => { if (n.includes(w)) intent += 8; });
   ['no','not sure','think','expensive','high','compare','later','maybe'].forEach(w => { if (n.includes(w)) intent -= 6; });
@@ -496,48 +485,41 @@ function localAnalyse(notesRaw) {
   if (['wife','spouse','expensive','compare','thinking','not ready'].some(w => n.includes(w))) risk = 'High';
   if (['test drive','book','deposit','confirm'].some(w => n.includes(w)) && risk !== 'High') risk = 'Low';
 
-  // ── Conversation stage (renamed): Exploring -> Interested -> Comparing -> Deciding -> Committing ──
   let stage = 'Exploring';
-  if (n.includes('sign') || n.includes('deposit') || n.includes('confirm')) stage = 'Committing';
-  else if (n.includes('expensive') || n.includes('think') || n.includes('wife')) stage = 'Deciding';
-  else if (n.includes('compar')) stage = 'Comparing';
-  else if (intent >= 60) stage = 'Interested';
+  if (n.includes('sign') || n.includes('deposit') || n.includes('confirm'))          stage = 'Committing';
+  else if (n.includes('expensive') || n.includes('think') || n.includes('wife'))     stage = 'Deciding';
+  else if (n.includes('compar'))                                                       stage = 'Comparing';
+  else if (intent >= 60)                                                                stage = 'Interested';
 
-  const dismissesFeatures = (n.includes('not interested in') || n.includes("don't care about") || n.includes('skip the') || n.includes("don't need")) &&
-                             (n.includes('feature') || n.includes('spec') || n.includes('tech'));
-  const focusesOnOutlook  = n.includes('design') || n.includes('outlook') || n.includes('look') || n.includes('color') || n.includes('colour') || n.includes('exterior') || n.includes('style');
+  const dismissesFeatures  = (n.includes('not interested in') || n.includes("don't care about") || n.includes('skip the') || n.includes("don't need")) && (n.includes('feature') || n.includes('spec') || n.includes('tech'));
+  const focusesOnOutlook   = n.includes('design') || n.includes('outlook') || n.includes('look') || n.includes('color') || n.includes('colour') || n.includes('exterior') || n.includes('style');
   const focusesOnPriceOnly = (n.includes('just want') || n.includes('only care about') || n.includes('bottom line')) && (n.includes('price') || n.includes('cheap'));
   const isAestheticPriceBuyer = dismissesFeatures || focusesOnOutlook || focusesOnPriceOnly;
 
-  // ── STEP 3: What is the salesperson trying to achieve? (internal -- no dedicated UI in v1.5) ──
   let objective = 'Build trust';
-  if (stage === 'Interested')                  objective = 'Discover motivation';
-  if (stage === 'Comparing')                    objective = 'Reduce price sensitivity';
-  if (stage === 'Deciding')                      objective = 'Handle objection';
-  if (stage === 'Committing')                     objective = 'Close';
-  if (isAestheticPriceBuyer)                       objective = 'Reduce price sensitivity';
+  if (stage === 'Interested')   objective = 'Discover motivation';
+  if (stage === 'Comparing')    objective = 'Reduce price sensitivity';
+  if (stage === 'Deciding')     objective = 'Handle objection';
+  if (stage === 'Committing')   objective = 'Close';
+  if (isAestheticPriceBuyer)    objective = 'Reduce price sensitivity';
   if (mem.objectionsRaised.length > 0 && stage !== 'Committing') objective = 'Handle objection';
 
-  // ── STEP 4: single best next question -- exactly one, informed by memory ──
   let bestQuestion = 'What would need to be true for you to feel completely comfortable deciding today?';
   if (objective === 'Build trust')              bestQuestion = 'What would make you feel fully confident this is the right decision?';
   if (objective === 'Discover motivation')      bestQuestion = 'What is the one thing your current car does not give you that you are looking for now?';
   if (objective === 'Reduce price sensitivity') bestQuestion = 'Out of everything you have seen, what is still missing?';
-  if (objective === 'Handle objection') {
-    bestQuestion = (why === 'Family') ? 'What would your partner need to see to feel comfortable?' : 'What specifically would need to change here?';
-  }
-  if (objective === 'Close')                     bestQuestion = 'Is there anything that would stop you from moving forward today?';
-  if (isAestheticPriceBuyer)                      bestQuestion = 'What colour or look would feel most like "you" when you picture driving this every day?';
+  if (objective === 'Handle objection')         bestQuestion = (why === 'Family') ? 'What would your partner need to see to feel comfortable?' : 'What specifically would need to change here?';
+  if (objective === 'Close')                    bestQuestion = 'Is there anything that would stop you from moving forward today?';
+  if (isAestheticPriceBuyer)                    bestQuestion = 'What colour or look would feel most like "you" when you picture driving this every day?';
   if (mem.objectionsResolved.includes('Needs partner approval') && bestQuestion.includes('partner')) {
     bestQuestion = 'Now that we have covered that -- what would help you feel ready to decide?';
   }
 
   let say = 'Tell me more about what matters most to you here.';
-  if (why === 'Budget')  say = 'Let me show you a few finance options side by side.';
-  if (why === 'Family')  say = 'Would it help if you both came in together?';
+  if (why === 'Budget')      say = 'Let me show you a few finance options side by side.';
+  if (why === 'Family')      say = 'Would it help if you both came in together?';
   if (isAestheticPriceBuyer) say = "Let's focus on how this looks and what it costs you monthly -- I won't walk you through every spec.";
 
-  // ── STEP 5: what the salesperson should NEVER do next ──
   let avoid = "Don't fill the silence -- let them think.";
   if (why === 'Budget')      avoid = "Don't cut the price first -- try restructuring the loan.";
   if (why === 'Comparison')  avoid = "Don't criticise competitors.";
@@ -547,7 +529,7 @@ function localAnalyse(notesRaw) {
   let action = 'Listen actively for the next two minutes.';
   if (n.includes('test drive') || intent >= 65) action = 'Book the test drive now.';
   if (why === 'Family')                          action = 'Offer a joint visit this weekend.';
-  if (isAestheticPriceBuyer)                      action = 'Show colour options and the monthly instalment number -- skip the spec sheet.';
+  if (isAestheticPriceBuyer)                     action = 'Show colour options and the monthly instalment number -- skip the spec sheet.';
 
   return {
     mood: feeling, moodIcon: feelingIcon(feeling),
@@ -563,7 +545,7 @@ function feelingIcon(feeling) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// APEX AI BRIDGE — calls /api/apex-ai, falls back to local logic
+// APEX AI BRIDGE
 // ════════════════════════════════════════════════════════════════
 
 async function apexAI(moduleName, input, context) {
@@ -601,7 +583,7 @@ function testAPIStatus() {
       if (p.status === 200 && p.data.ok) { val.textContent = 'Connected'; val.style.color = 'var(--green)'; }
       else { val.textContent = p.data.error || 'Error'; val.style.color = 'var(--red)'; }
     })
-    .catch(err => { val.textContent = 'Offline'; val.style.color = 'var(--red)'; });
+    .catch(() => { val.textContent = 'Offline'; val.style.color = 'var(--red)'; });
 }
 
 function refreshAPIStatusLabel() {
@@ -618,7 +600,8 @@ function renderCustomers() {
   const all = loadDeals();
   const filtered = q ? all.filter(c =>
     (c.input.name || '').toLowerCase().includes(q) ||
-    (c.input.car  || '').toLowerCase().includes(q)
+    (c.input.car  || '').toLowerCase().includes(q) ||
+    (c.input.mobile || '').toLowerCase().includes(q)
   ) : all;
 
   el('customers-empty').style.display = all.length === 0 ? '' : 'none';
@@ -637,7 +620,7 @@ function renderCustomers() {
     return `<div class="cust-card" onclick="openCustomerDetail('${c.id}')">
       <div class="cust-top">
         <div class="cust-avatar">${initials(inp.name)}</div>
-        <div><div class="cust-name">${inp.name || 'Unnamed'}</div><div class="cust-car">${inp.car || 'No car noted'}</div></div>
+        <div><div class="cust-name">${inp.name || 'Unnamed'}</div><div class="cust-car">${inp.car || 'No car noted'}${inp.mobile ? ' · ' + inp.mobile : ''}</div></div>
         <div class="cust-trust ${trust}">${prof.trust || 'Medium'}</div>
       </div>
       <div class="cust-grid">
@@ -660,6 +643,10 @@ function openCustomerDetail(id) {
   el('detail-content').innerHTML = `
     <div class="modal-title">${inp.name || 'Unnamed customer'}</div>
     <div class="coach-block"><div class="coach-block-lbl">Car</div><div class="coach-block-txt">${inp.car || '—'}</div></div>
+    ${inp.mobile ? `<div class="coach-block"><div class="coach-block-lbl">Mobile</div><div class="coach-block-txt"><a href="tel:${inp.mobile}" style="color:var(--blue)">${inp.mobile}</a></div></div>` : ''}
+    ${inp.budgetField ? `<div class="coach-block"><div class="coach-block-lbl">Monthly budget</div><div class="coach-block-txt">SGD ${inp.budgetField}</div></div>` : ''}
+    ${inp.tradeinCar ? `<div class="coach-block"><div class="coach-block-lbl">Trade-in car</div><div class="coach-block-txt">${inp.tradeinCar}</div></div>` : ''}
+    ${inp.remarks ? `<div class="coach-block"><div class="coach-block-lbl">Remarks</div><div class="coach-block-txt">${inp.remarks}</div></div>` : ''}
     <div class="coach-block"><div class="coach-block-lbl">Saved</div><div class="coach-block-txt">${dateStr}</div></div>
     <div class="coach-block"><div class="coach-block-lbl">Outcome</div><div class="coach-block-txt">${c.outcome || 'Pending'}</div></div>
     ${res.bestQuestion ? `<div class="coach-block"><div class="coach-block-lbl">Best question identified</div><div class="coach-block-txt">${res.bestQuestion}</div></div>` : ''}
@@ -711,7 +698,7 @@ function openCoachMe(type) {
   el('coach-why').textContent      = c.why;
   el('coach-mistake').textContent  = c.mistake;
   el('coach-better-q').textContent = c.betterQ;
-  el('coach-more').style.display = 'none';
+  el('coach-more').style.display   = 'none';
   el('coach-more-toggle').classList.remove('open');
   el('coach-modal').classList.add('open');
 }
@@ -725,7 +712,6 @@ function toggleCoachMore() {
 }
 
 function closeCoachMe() { el('coach-modal').classList.remove('open'); }
-
 
 // ════════════════════════════════════════════════════════════════
 // INSIGHTS SCREEN
@@ -769,7 +755,6 @@ function renderInsights() {
   el('ins-improve').textContent = improvement;
 }
 
-// ── Stat drilldown ──
 function openStatDrill(type) {
   const all = loadDeals();
   let title = '', items = [];
@@ -783,21 +768,15 @@ function openStatDrill(type) {
     title = 'Deals saved';
   } else if (type === 'objection') {
     const topObjection = el('ins-objection').textContent;
-    items = (topObjection && topObjection !== 'No data yet')
-      ? all.filter(c => c.result && c.result.objection === topObjection)
-      : [];
+    items = (topObjection && topObjection !== 'No data yet') ? all.filter(c => c.result && c.result.objection === topObjection) : [];
     title = topObjection && topObjection !== 'No data yet' ? '"' + topObjection + '"' : 'Customers with an objection';
   } else if (type === 'mistake') {
     const topMistake = el('ins-mistake').textContent;
-    items = (topMistake && topMistake !== 'No data yet')
-      ? all.filter(c => c.result && c.result.mistakeFlag === topMistake)
-      : [];
+    items = (topMistake && topMistake !== 'No data yet') ? all.filter(c => c.result && c.result.mistakeFlag === topMistake) : [];
     title = topMistake && topMistake !== 'No data yet' ? '"' + topMistake + '"' : 'Deals with a flagged mistake';
   } else if (type === 'question') {
     const topQuestion = el('ins-question').textContent;
-    items = (topQuestion && topQuestion !== 'No data yet')
-      ? all.filter(c => c.result && c.result.bestQuestion === topQuestion)
-      : [];
+    items = (topQuestion && topQuestion !== 'No data yet') ? all.filter(c => c.result && c.result.bestQuestion === topQuestion) : [];
     title = 'Where this question was used';
   }
 
@@ -869,38 +848,36 @@ function mem_reset() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// GLOBAL EXPORTS — explicitly attach every function called from
-// index.html onclick/oninput/onchange to window, so they are
-// always reachable regardless of script loading context.
+// GLOBAL EXPORTS
 // ════════════════════════════════════════════════════════════════
 
-window.goLiveNew        = goLiveNew;
-window.goLiveContinue   = goLiveContinue;
-window.goHome           = goHome;
-window.showScreen       = showScreen;
-window.liveUpdate       = liveUpdate;
-window.liveSaveDraft    = liveSaveDraft;
-window.clearNotesOnly   = clearNotesOnly;
-window.toggleMoreAdvice = toggleMoreAdvice;
-window.openCoachMe      = openCoachMe;
-window.toggleCoachMore  = toggleCoachMore;
-window.closeCoachMe     = closeCoachMe;
-window.openFinishSheet  = openFinishSheet;
-window.closeFinishSheet = closeFinishSheet;
-window.finishDeal       = finishDeal;
-window.startNewCustomer = startNewCustomer;
-window.toggleCalculator = toggleCalculator;
-window.runCalculator    = runCalculator;
-window.renderCustomers  = renderCustomers;
+window.goLiveNew          = goLiveNew;
+window.goLiveContinue     = goLiveContinue;
+window.goHome             = goHome;
+window.showScreen         = showScreen;
+window.liveUpdate         = liveUpdate;
+window.liveSaveDraft      = liveSaveDraft;
+window.clearNotesOnly     = clearNotesOnly;
+window.toggleMoreAdvice   = toggleMoreAdvice;
+window.openCoachMe        = openCoachMe;
+window.toggleCoachMore    = toggleCoachMore;
+window.closeCoachMe       = closeCoachMe;
+window.openFinishSheet    = openFinishSheet;
+window.closeFinishSheet   = closeFinishSheet;
+window.finishDeal         = finishDeal;
+window.startNewCustomer   = startNewCustomer;
+window.toggleCalculator   = toggleCalculator;
+window.runCalculator      = runCalculator;
+window.renderCustomers    = renderCustomers;
 window.openCustomerDetail = openCustomerDetail;
-window.closeDetail      = closeDetail;
-window.deleteCustomer   = deleteCustomer;
-window.openStatDrill    = openStatDrill;
-window.closeStatDrill   = closeStatDrill;
-window.mem_export       = mem_export;
-window.mem_import       = mem_import;
-window.mem_reset        = mem_reset;
-window.testAPIStatus    = testAPIStatus;
+window.closeDetail        = closeDetail;
+window.deleteCustomer     = deleteCustomer;
+window.openStatDrill      = openStatDrill;
+window.closeStatDrill     = closeStatDrill;
+window.mem_export         = mem_export;
+window.mem_import         = mem_import;
+window.mem_reset          = mem_reset;
+window.testAPIStatus      = testAPIStatus;
 
 // ════════════════════════════════════════════════════════════════
 // INIT
