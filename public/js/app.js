@@ -853,3 +853,37 @@ function mem_reset() {
   if (draft) liveLoadIntoForm();
   renderHome();
 })();
+
+// ════════════════════════════════════════════════════════════════
+// GLOBAL EXPORTS — explicitly attach every function called from
+// index.html onclick/oninput/onchange to window, so they are
+// always reachable regardless of script loading context.
+// ════════════════════════════════════════════════════════════════
+
+window.goLiveNew        = goLiveNew;
+window.goLiveContinue   = goLiveContinue;
+window.goHome           = goHome;
+window.showScreen       = showScreen;
+window.liveUpdate       = liveUpdate;
+window.liveSaveDraft    = liveSaveDraft;
+window.clearNotesOnly   = clearNotesOnly;
+window.toggleMoreAdvice = toggleMoreAdvice;
+window.openCoachMe      = openCoachMe;
+window.toggleCoachMore  = toggleCoachMore;
+window.closeCoachMe     = closeCoachMe;
+window.openFinishSheet  = openFinishSheet;
+window.closeFinishSheet = closeFinishSheet;
+window.finishDeal       = finishDeal;
+window.startNewCustomer = startNewCustomer;
+window.toggleCalculator = toggleCalculator;
+window.runCalculator    = runCalculator;
+window.renderCustomers  = renderCustomers;
+window.openCustomerDetail = openCustomerDetail;
+window.closeDetail      = closeDetail;
+window.deleteCustomer   = deleteCustomer;
+window.openStatDrill    = openStatDrill;
+window.closeStatDrill   = closeStatDrill;
+window.mem_export       = mem_export;
+window.mem_import       = mem_import;
+window.mem_reset        = mem_reset;
+window.testAPIStatus    = testAPIStatus;
