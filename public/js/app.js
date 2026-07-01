@@ -869,16 +869,6 @@ function mem_reset() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// INIT
-// ════════════════════════════════════════════════════════════════
-
-(function init() {
-  const draft = loadDraft();
-  if (draft) liveLoadIntoForm();
-  renderHome();
-})();
-
-// ════════════════════════════════════════════════════════════════
 // GLOBAL EXPORTS — explicitly attach every function called from
 // index.html onclick/oninput/onchange to window, so they are
 // always reachable regardless of script loading context.
@@ -911,3 +901,13 @@ window.mem_export       = mem_export;
 window.mem_import       = mem_import;
 window.mem_reset        = mem_reset;
 window.testAPIStatus    = testAPIStatus;
+
+// ════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════
+
+(function init() {
+  const draft = loadDraft();
+  if (draft) liveLoadIntoForm();
+  renderHome();
+})();
