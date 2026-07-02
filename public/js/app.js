@@ -322,13 +322,13 @@ function closeFinishSheet() { el('finish-modal').classList.remove('open'); }
 function finishDeal(outcome) {
   closeFinishSheet();
 
-  const name       = el('live-name').value.trim();
-  const car        = el('live-car').value.trim();
-  const mobile     = el('live-mobile').value.trim();
+  const name        = el('live-name').value.trim();
+  const car         = el('live-car').value.trim();
+  const mobile      = el('live-mobile').value.trim();
   const budgetField = el('live-budget').value.trim();
   const tradeinCar  = el('live-tradein-car').value.trim();
   const remarks     = el('live-remarks').value.trim();
-  const notes      = el('live-notes').value.trim();
+  const notes       = el('live-notes').value.trim();
 
   const a = _liveAnalysis || {};
   const objectionText = detectObjection(notes);
@@ -337,6 +337,18 @@ function finishDeal(outcome) {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2),
     ts: Date.now(),
     input: { name, car, mobile, budgetField, tradeinCar, remarks, notes },
+    calc: {
+      price:    el('calc-price').value    || '',
+      tradein:  el('calc-tradein').value  || '',
+      dp:       el('calc-dp').value       || '',
+      maxloan:  el('calc-maxloan').value  || '',
+      loan:     el('calc-loan').value     || '',
+      rate:     el('calc-rate').value     || '',
+      tenure:   el('calc-tenure').value   || '',
+      monthly:  el('calc-monthly').textContent  || '',
+      interest: el('calc-total-interest').textContent || '',
+      repay:    el('calc-total-repay').textContent    || ''
+    },
     result: {
       profile: { type: '', stage: a.stage || '', trust: a.trust || '', prob: a.intent || 0 },
       risk: a.risk || 'Medium',
@@ -599,8 +611,8 @@ function renderCustomers() {
   const q = (el('cust-search').value || '').toLowerCase();
   const all = loadDeals();
   const filtered = q ? all.filter(c =>
-    (c.input.name || '').toLowerCase().includes(q) ||
-    (c.input.car  || '').toLowerCase().includes(q) ||
+    (c.input.name   || '').toLowerCase().includes(q) ||
+    (c.input.car    || '').toLowerCase().includes(q) ||
     (c.input.mobile || '').toLowerCase().includes(q)
   ) : all;
 
@@ -635,24 +647,82 @@ function renderCustomers() {
 }
 
 function openCustomerDetail(id) {
-  const c = loadDeals().find(x => x.id === id);
-  if (!c) return;
-  const inp = c.input || {}, res = c.result || {};
-  const dateStr = new Date(c.ts).toLocaleString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const all = loadDeals();
+  const anchor = all.find(x => x.id === id);
+  if (!anchor) return;
 
-  el('detail-content').innerHTML = `
-    <div class="modal-title">${inp.name || 'Unnamed customer'}</div>
-    <div class="coach-block"><div class="coach-block-lbl">Car</div><div class="coach-block-txt">${inp.car || '—'}</div></div>
-    ${inp.mobile ? `<div class="coach-block"><div class="coach-block-lbl">Mobile</div><div class="coach-block-txt"><a href="tel:${inp.mobile}" style="color:var(--blue)">${inp.mobile}</a></div></div>` : ''}
-    ${inp.budgetField ? `<div class="coach-block"><div class="coach-block-lbl">Monthly budget</div><div class="coach-block-txt">SGD ${inp.budgetField}</div></div>` : ''}
-    ${inp.tradeinCar ? `<div class="coach-block"><div class="coach-block-lbl">Trade-in car</div><div class="coach-block-txt">${inp.tradeinCar}</div></div>` : ''}
-    ${inp.remarks ? `<div class="coach-block"><div class="coach-block-lbl">Remarks</div><div class="coach-block-txt">${inp.remarks}</div></div>` : ''}
-    <div class="coach-block"><div class="coach-block-lbl">Saved</div><div class="coach-block-txt">${dateStr}</div></div>
-    <div class="coach-block"><div class="coach-block-lbl">Outcome</div><div class="coach-block-txt">${c.outcome || 'Pending'}</div></div>
-    ${res.bestQuestion ? `<div class="coach-block"><div class="coach-block-lbl">Best question identified</div><div class="coach-block-txt">${res.bestQuestion}</div></div>` : ''}
-    <div class="coach-block"><div class="coach-block-lbl">Notes</div><div class="coach-block-txt">${inp.notes || 'No notes recorded.'}</div></div>
-    <button class="big-btn ghost" style="margin-top:1rem" onclick="deleteCustomer('${c.id}')">Delete this record</button>
-  `;
+  // Group all deals for this customer by name (case-insensitive)
+  const anchorName = (anchor.input.name || '').toLowerCase().trim();
+  const group = anchorName
+    ? all.filter(c => (c.input.name || '').toLowerCase().trim() === anchorName)
+    : [anchor];
+
+  // Use the most recent record for profile info
+  const latest = group.reduce((a, b) => (a.ts > b.ts ? a : b));
+  const inp = latest.input || {};
+  const calc = latest.calc || {};
+
+  // ── Section helpers ──
+  const row = (lbl, val) => val
+    ? `<div class="cb2-row"><div class="cb2-lbl">${lbl}</div><div class="cb2-val">${val}</div></div>`
+    : '';
+  const section = (title, content) =>
+    `<div class="cb2-section"><div class="cb2-section-title">${title}</div>${content}</div>`;
+
+  // ── Customer Information ──
+  const infoSection = section('Customer Information', [
+    row('Name',           inp.name || '—'),
+    row('Mobile',         inp.mobile ? `<a href="tel:${inp.mobile}" style="color:var(--blue)">${inp.mobile}</a>` : ''),
+    row('Interested car', inp.car || '—'),
+    row('Trade-in car',   inp.tradeinCar || ''),
+    row('Monthly budget', inp.budgetField ? 'SGD ' + inp.budgetField : '')
+  ].join(''));
+
+  // ── Finance Snapshot (only if calculator was used) ──
+  const hasCalc = calc.price || calc.monthly;
+  const financeSection = hasCalc ? section('Finance Snapshot', [
+    row('Vehicle price',      calc.price   ? 'SGD ' + parseFloat(calc.price).toLocaleString('en-SG')   : ''),
+    row('Downpayment',        calc.dp      ? 'SGD ' + parseFloat(calc.dp).toLocaleString('en-SG')      : ''),
+    row('Trade-in value',     calc.tradein && calc.tradein !== '0' ? 'SGD ' + parseFloat(calc.tradein).toLocaleString('en-SG') : ''),
+    row('Loan amount',        calc.loan    || ''),
+    row('Interest rate',      calc.rate    ? calc.rate + '% p.a.'  : ''),
+    row('Loan tenure',        calc.tenure  ? calc.tenure + ' years' : ''),
+    row('Monthly instalment', calc.monthly || ''),
+    row('Total interest',     calc.interest || ''),
+    row('Total repayment',    calc.repay    || '')
+  ].join('')) : '';
+
+  // ── Permanent Remarks ──
+  const remarksSection = inp.remarks
+    ? section('Remarks', `<div class="cb2-remarks">${inp.remarks}</div>`)
+    : '';
+
+  // ── Conversation Timeline ──
+  const sorted = group.slice().sort((a, b) => a.ts - b.ts);
+  const outcomeIcon = { Won: '✅', Lost: '❌', Pending: '⏳', Cancelled: '🚫' };
+  const timelineItems = sorted.map(c => {
+    const ts = new Date(c.ts).toLocaleString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const res = c.result || {};
+    const icon = outcomeIcon[c.outcome] || '📋';
+    return `<div class="cb2-timeline-item">
+      <div class="cb2-timeline-header">
+        <span class="cb2-timeline-date">${ts}</span>
+        <span class="cb2-timeline-outcome">${icon} ${c.outcome || 'Pending'}</span>
+      </div>
+      ${c.input.notes ? `<div class="cb2-timeline-field"><div class="cb2-timeline-lbl">Notes</div><div class="cb2-timeline-txt">${c.input.notes}</div></div>` : ''}
+      ${res.bestQuestion ? `<div class="cb2-timeline-field"><div class="cb2-timeline-lbl">AI Question</div><div class="cb2-timeline-txt cb2-ai">${res.bestQuestion}</div></div>` : ''}
+      ${res.objection ? `<div class="cb2-timeline-field"><div class="cb2-timeline-lbl">Objection</div><div class="cb2-timeline-txt">${res.objection}</div></div>` : ''}
+    </div>`;
+  }).join('');
+  const timelineSection = section('Conversation Timeline', `<div class="cb2-timeline">${timelineItems}</div>`);
+
+  // ── Delete button ──
+  const deleteBtn = `<button class="big-btn ghost" style="margin-top:.5rem" onclick="deleteCustomer('${anchor.id}')">Delete this record</button>`;
+
+  el('detail-content').innerHTML =
+    `<div class="modal-title">${inp.name || 'Unnamed customer'}</div>` +
+    infoSection + financeSection + remarksSection + timelineSection + deleteBtn;
+
   el('detail-modal').classList.add('open');
 }
 
